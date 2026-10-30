@@ -81,4 +81,4 @@ Sonra tarayıcıda `http://localhost:8101` adresini aç.
 - `js/cards.js`, `js/yedili.js`, `js/blackjack.js`: iskambil oyunları
 - `css/style.css`: görünüm ve temalar
 
-Yeni sürüm yayınlarken `index.html` içindeki `?v=4` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.
+Yeni sürüm yayınlarken üç yerde aynı numarayı artır: `index.html` içindeki `?v=N`, `version.json` ve `js/app.js` içindeki `APP_VERSION`. Böylece eski sayfa önbellekte kalmış oyuncular otomatik yenilenir.

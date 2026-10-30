@@ -865,6 +865,18 @@
   };
 
   // ================= Başlangıç =================
+  // GitHub Pages sayfayı önbellekte tutabilir: daha yeni sürüm varsa bir kez yenile
+  const APP_VERSION = 5;
+  fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(({ v }) => {
+    const key = 'okey101-reloaded-' + v;
+    if (v > APP_VERSION && !sstore.get(key)) {
+      sstore.set(key, '1');
+      const u = new URL(location.href);
+      u.searchParams.set('_v', v);
+      location.replace(u.toString());
+    }
+  }).catch(() => {});
+
   applyTheme();
   $('#name').value = store.get(NAME_KEY) || '';
   if (location.hash === '#debug' || store.get('okey101-debug')) window.__app = S;
