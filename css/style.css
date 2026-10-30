@@ -18,7 +18,7 @@
   --good: #22c55e;
   --card: #fffdf8;
   --panel: rgba(255, 255, 255, .94);
-  --tw: clamp(22px, calc((100vw - 420px) / 18), 46px);
+  --tw: clamp(22px, calc((100vw - 140px) / 18), 46px);
   --th: calc(var(--tw) * 1.38);
 }
 
@@ -53,11 +53,10 @@ body {
   transition: background .4s;
 }
 
-.app { display: flex; gap: 12px; padding: 12px; min-height: 100vh; align-items: flex-start; }
-.main { flex: 1; min-width: 0; }
+.app { padding: 12px; min-height: 100vh; }
 .screen { display: none; min-height: calc(100vh - 24px); }
 .screen.active { display: flex; }
-#menu, #lobby { align-items: center; justify-content: center; padding: 16px; }
+#menu { align-items: center; justify-content: center; padding: 16px; }
 
 .card {
   background: var(--card);
@@ -105,18 +104,10 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
 .join-row input { text-transform: uppercase; letter-spacing: 3px; font-weight: 700; text-align: center; }
 .join-row .btn { width: auto; }
 
-/* ---------- lobi ---------- */
-#lobby { align-items: stretch; justify-content: flex-start; padding: 0; }
-.lobby-wrap { display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.lobby-card {
-  width: 100%; padding: 14px 16px; display: grid; gap: 16px; align-items: start;
-  grid-template-columns: auto minmax(260px, 1.4fr) minmax(200px, 1fr) minmax(180px, auto);
-}
-.lobby-card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 0 0 6px; }
-.lb-code { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.lb-start { display: flex; flex-direction: column; gap: 6px; align-self: center; }
-.lb-start .btn.big { font-size: 15px; padding: 12px 14px; }
+/* ---------- lobi (panel içi) ---------- */
+#lobbyCard { display: flex; flex-direction: column; gap: 8px; }
 .room-code { font-size: 30px; font-weight: 800; letter-spacing: 6px; color: var(--felt); line-height: 1.1; }
+.waiting { text-align: center; color: var(--muted); margin: 4px 0; }
 .game-picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .game-pick {
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 6px; border-radius: 14px;
@@ -147,38 +138,87 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
 .badge.ok { background: var(--good); color: #fff; }
 .badge.warn { background: var(--red); color: #fff; }
 
-/* ---------- salon ---------- */
-.salon-wrap {
-  position: relative; width: min(100%, calc((100vh - 270px) * 1.579)); min-width: min(100%, 520px); aspect-ratio: 1200 / 760;
-  margin: 0 auto; border-radius: 20px; overflow: hidden; background: #ffb3cf;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, .3), 0 0 0 4px rgba(255, 255, 255, .5);
-}
+/* ---------- salon (tam ekran lobi) ---------- */
+#lobby.active { position: fixed; inset: 0; z-index: 1; }
+.salon-wrap { position: absolute; inset: 0; background: #3b2a4d; overflow: hidden; }
 #salon { width: 100%; height: 100%; display: block; touch-action: none; }
 .salon-ui { position: absolute; inset: 0; pointer-events: none; }
-.salon-ui > * { pointer-events: auto; }
-.tidy-btn, .emote-bar button, .sbtn {
-  border: 0; font: inherit; cursor: pointer; background: rgba(255, 255, 255, .9); box-shadow: 0 4px 10px rgba(0, 0, 0, .2);
+.salon-ui > *, .salon-right > * { pointer-events: auto; }
+.mbtn, .emote-bar button, .sbtn {
+  border: 0; font: inherit; cursor: pointer; background: rgba(255, 255, 255, .92); box-shadow: 0 4px 10px rgba(0, 0, 0, .25);
   transition: transform .1s;
 }
-.tidy-btn:active, .emote-bar button:active, .sbtn:active { transform: scale(.92); }
-.tidy-btn { position: absolute; top: 10px; left: 10px; border-radius: 99px; padding: 6px 12px; font-size: 13px; font-weight: 700; }
-.emote-bar { position: absolute; top: 10px; right: 10px; display: flex; gap: 4px; }
-.emote-bar button { width: 34px; height: 34px; border-radius: 50%; font-size: 17px; padding: 0; }
-.salon-btns { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 10px; }
-.sbtn { width: 62px; height: 62px; border-radius: 50%; font-size: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }
+.mbtn:active, .emote-bar button:active, .sbtn:active { transform: scale(.92); }
+.salon-right { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: none; }
+.emote-bar { display: none; gap: 5px; background: rgba(255, 255, 255, .5); padding: 6px; border-radius: 99px; }
+.emote-bar.open { display: flex; }
+.emote-bar button { width: 38px; height: 38px; border-radius: 50%; font-size: 19px; padding: 0; }
+.mini-btns { display: flex; gap: 8px; }
+.mbtn { width: 44px; height: 44px; border-radius: 50%; font-size: 20px; padding: 0; }
+.salon-btns { display: flex; gap: 10px; }
+.sbtn { width: 64px; height: 64px; border-radius: 50%; font-size: 25px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; }
 .sbtn small { font-size: 10px; font-weight: 800; }
 .joy {
-  display: none; position: absolute; left: 16px; bottom: 16px; width: 112px; height: 112px; border-radius: 50%;
+  display: none; position: absolute; left: 18px; bottom: 18px; width: 112px; height: 112px; border-radius: 50%;
   background: rgba(255, 255, 255, .35); border: 3px solid rgba(255, 255, 255, .8); touch-action: none;
 }
 .joy-knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, .3); pointer-events: none; }
-@media (pointer: coarse) { .joy { display: block; } }
-.salon-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
-.look-bar { display: flex; gap: 12px; align-items: center; background: var(--panel); border-radius: 14px; padding: 8px 12px; flex-wrap: wrap; }
+@media (pointer: coarse) { .joy { display: block; } .salon-help { display: none; } }
+.hud-chip {
+  position: absolute; top: 14px; left: 14px; display: flex; align-items: center; gap: 6px;
+  background: rgba(255, 255, 255, .92); border-radius: 99px; padding: 8px 14px; font-size: 14px; box-shadow: 0 4px 12px rgba(0, 0, 0, .2);
+}
+.hc-code { font-weight: 900; letter-spacing: 3px; color: var(--felt); }
+.hc-sep { color: var(--muted); }
+.hud-start { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; justify-content: center; max-width: calc(100% - 340px); }
+.start-btn { font-size: 18px; padding: 14px 26px; border-radius: 99px; box-shadow: 0 5px 0 #c9930f, 0 10px 24px rgba(0, 0, 0, .3); animation: pulse 1.6s infinite; }
+.hud-msg { background: rgba(255, 255, 255, .92); border-radius: 99px; padding: 10px 16px; font-size: 14px; box-shadow: 0 4px 12px rgba(0, 0, 0, .2); text-align: center; }
+.hud-msg .btn { margin-left: 6px; }
+.salon-help { position: absolute; left: 14px; bottom: 14px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, .3); padding: 7px 11px; border-radius: 12px; }
 .hats { display: flex; gap: 4px; flex-wrap: wrap; }
-.hat-btn { padding: 4px 9px; border-radius: 99px; border: 2px solid transparent; background: #f1f3f5; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.hat-btn { padding: 6px 11px; border-radius: 99px; border: 2px solid transparent; background: #f1f3f5; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .hat-btn.sel { border-color: var(--felt); background: color-mix(in srgb, var(--felt-light) 20%, #fff); }
-.salon-help { color: #fff; font-size: 13px; background: rgba(0, 0, 0, .2); padding: 8px 12px; border-radius: 12px; }
+#lookBar { display: flex; flex-direction: column; gap: 10px; }
+#lookBar .sw { width: 32px; height: 32px; }
+
+/* ---------- sağ üst düğmeler + tek panel ---------- */
+.dock { position: fixed; top: 12px; right: 12px; z-index: 450; display: flex; gap: 6px; }
+.dock-btn {
+  position: relative; height: 44px; min-width: 44px; border-radius: 99px; border: 0; padding: 0 10px; font: inherit; font-size: 20px;
+  background: rgba(255, 255, 255, .92); box-shadow: 0 4px 12px rgba(0, 0, 0, .22); cursor: pointer; transition: transform .1s;
+}
+.dock-btn:hover { transform: translateY(-2px); }
+.dock-btn.on { background: var(--gold); }
+.dock-btn.wide { font-size: 14px; font-weight: 800; }
+.dock-btn.live { box-shadow: 0 0 0 3px var(--good), 0 4px 12px rgba(0, 0, 0, .22); }
+.dock-btn.muted { box-shadow: 0 0 0 3px #adb5bd, 0 4px 12px rgba(0, 0, 0, .22); }
+.dock-dot {
+  position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; border-radius: 99px; background: var(--red); color: #fff;
+  font-size: 11px; font-weight: 800; display: grid; place-items: center; padding: 0 5px;
+}
+.menu-btn { display: none; }
+.drawer {
+  position: fixed; top: 66px; right: 12px; z-index: 440; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 80px);
+  background: var(--card); border-radius: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, .35); display: flex; flex-direction: column;
+  animation: drawerIn .18s ease-out;
+}
+@keyframes drawerIn { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+.drawer-head { display: flex; align-items: flex-start; gap: 6px; padding: 10px 10px 0; }
+.drawer-tabs { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; }
+.dtab { border: 0; background: #f1f3f5; border-radius: 99px; padding: 6px 10px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.dtab.on { background: var(--felt); color: #fff; }
+.drawer-x { border: 0; background: transparent; font-size: 18px; cursor: pointer; padding: 6px 8px; color: var(--muted); }
+.drawer-body { padding: 12px 14px 14px; overflow: auto; min-height: 0; }
+.dpanel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 6px 0; display: flex; align-items: center; gap: 8px; }
+.dpanel .log { max-height: 50vh; }
+.chat-log { min-height: 160px; }
+.leave-btn { margin-top: 12px; }
+.chat-pop {
+  position: fixed; left: 14px; top: 64px; z-index: 430; max-width: min(360px, 80vw); background: rgba(255, 255, 255, .96);
+  border-radius: 14px 14px 14px 4px; padding: 10px 14px; font-size: 14px; box-shadow: 0 8px 20px rgba(0, 0, 0, .25);
+  opacity: 0; transform: translateY(-6px); transition: all .25s; pointer-events: none;
+}
+.chat-pop.show { opacity: 1; transform: none; }
 
 /* ---------- okey taşları ---------- */
 .tile {
@@ -208,7 +248,7 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
 }
 .tile.back { background: linear-gradient(135deg, var(--felt-light), var(--felt)); border-bottom-color: var(--felt-dark); }
 .tile.empty { background: rgba(255, 255, 255, .08); border: 2px dashed rgba(255, 255, 255, .3); box-shadow: none; }
-.tile.sm { --tw: clamp(18px, calc((100vw - 420px) / 30), 30px); }
+.tile.sm { --tw: clamp(18px, calc((100vw - 140px) / 30), 30px); }
 
 /* ---------- okey düzeni ---------- */
 #game { align-items: stretch; }
@@ -402,21 +442,14 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
 .bj-res.win { background: var(--good); }
 .bj-res.lose { background: var(--red); }
 
-/* ---------- yan panel ---------- */
-.side { width: 300px; flex: none; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 24px); position: sticky; top: 12px; overflow: auto; }
-.panel { background: var(--panel); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; min-height: 0; box-shadow: 0 6px 18px rgba(0, 0, 0, .15); }
-.panel.grow { flex: 1; }
-.panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.log { flex: 1; overflow: auto; font-size: 12.5px; line-height: 1.45; min-height: 60px; max-height: 200px; }
+/* ---------- panel içerikleri ---------- */
+.log { overflow: auto; font-size: 13px; line-height: 1.5; min-height: 60px; }
 .log .sys { color: var(--muted); font-style: italic; }
 .chat-form { display: flex; gap: 6px; margin-top: 6px; }
 .chat-form input { padding: 7px 9px; font-size: 13px; }
-.room-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.code-sm { font-size: 18px; letter-spacing: 3px; color: var(--felt); }
 .room-players { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .rp { font-size: 12px; background: #f3f4f6; border-radius: 99px; padding: 2px 8px; }
 .rp.off { opacity: .45; text-decoration: line-through; }
-.room-game { margin-top: 6px; justify-content: space-between; }
 .live { color: var(--good); font-size: 11px; text-transform: none; letter-spacing: 0; }
 .vlist { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .vchip { font-size: 12px; background: color-mix(in srgb, var(--good) 18%, #fff); border-radius: 99px; padding: 2px 8px; }
@@ -466,18 +499,9 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* ---------- dar ekran ---------- */
-@media (max-width: 1300px) {
-  .lobby-card { grid-template-columns: auto 1fr; }
-}
-@media (max-width: 1100px) {
-  :root { --tw: clamp(22px, calc((100vw - 120px) / 18), 46px); }
-  .tile.sm { --tw: clamp(18px, calc((100vw - 120px) / 30), 30px); }
-  .app { flex-direction: column; align-items: stretch; }
-  .side { width: 100%; max-height: none; position: static; flex-direction: row; flex-wrap: wrap; overflow: visible; }
-  .side .panel { flex: 1 1 260px; }
-  .board { height: calc(100vh - 24px); }
-  .screen { min-height: auto; }
-  #menu, #lobby { min-height: 70vh; }
+@media (max-width: 900px) {
+  .hud-start { max-width: calc(100% - 200px); bottom: 100px; }
+  .salon-help { display: none; }
 }
 @media (max-width: 700px) {
   :root { --tw: calc((100vw - 60px) / 16.5); }
@@ -498,12 +522,16 @@ input:focus { outline: 2px solid var(--gold); border-color: transparent; }
   .center-bar { gap: 12px; }
   .game-picks { grid-template-columns: repeat(3, 1fr); }
   .game-pick small { display: none; }
-  .salon-wrap { min-width: 0; width: 100%; aspect-ratio: 4 / 5; }
-  .joy { opacity: .75; }
-  .emote-bar { top: auto; bottom: 84px; right: 10px; flex-direction: column; }
-  .salon-help { display: none; }
+  .joy { opacity: .8; }
+  .emote-bar.open { flex-wrap: wrap; justify-content: flex-end; max-width: 140px; border-radius: 22px; }
+  .dock-btn:not(.menu-btn):not(.wide) { display: none; }
+  .menu-btn { display: inline-block; }
+  .drawer { top: auto; bottom: 0; right: 0; left: 0; width: 100%; max-height: 75vh; border-radius: 20px 20px 0 0; }
+  .hud-chip { top: 12px; left: 12px; font-size: 12px; padding: 6px 10px; max-width: calc(100% - 140px); flex-wrap: wrap; }
+  .hud-start { left: 50%; bottom: 140px; max-width: 90%; }
+  .start-btn { font-size: 16px; padding: 12px 20px; }
+  .chat-pop { top: auto; bottom: 150px; }
   .ybox { min-width: 110px; }
-  .lobby-card { grid-template-columns: 1fr; }
   .sbtn { width: 54px; height: 54px; }
   .joy { width: 96px; height: 96px; }
   .ycenter { gap: 14px; padding: 14px; }

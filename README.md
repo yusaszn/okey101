@@ -30,7 +30,7 @@ Lobi, odadaki herkesin tombul karakteriyle dolaştığı bir ev salonudur (botla
 - **WASD / Oklar**: yürü · **Boşluk**: yakındakini tut / bırak · **Shift** (veya F): it, birini tutarken basarsan fırlat · **1-6**: ifade
 - Tutulan kişi yön tuşlarına basarak debelenir ve kurtulur. İtilen ya da fırlatılan sersemler.
 - Saksılar, lamba ve vazo çarpınca devrilir; "Salonu Topla" hepsini yerine koyar.
-- Alttaki "Karakterim" bölümünden renk ve şapka seçilir.
+- Sağ üstteki 🙂 Karakterim düğmesinden renk ve şapka seçilir. Oyun seçimi, sohbet, ses, oda ve görünüm de sağ üstteki düğmelerdedir; telefonda ☰ menüde toplanır.
 - Telefonda ekrandaki joystick ve Tut / İt düğmeleri kullanılır, kamera karakterini takip eder.
 
 ## Pis Yedili
@@ -81,4 +81,4 @@ Sonra tarayıcıda `http://localhost:8101` adresini aç.
 - `js/cards.js`, `js/yedili.js`, `js/blackjack.js`: iskambil oyunları
 - `css/style.css`: görünüm ve temalar
 
-Yeni sürüm yayınlarken `index.html` içindeki `?v=3` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.
+Yeni sürüm yayınlarken `index.html` içindeki `?v=4` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.

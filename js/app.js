@@ -37,7 +37,7 @@
     seats: [null, null, null, null], mode: 'okey', game: null, order: null, gameSeq: 0,
     botTimer: null, dropTimers: {}, retry: 0, sim: null, simTimer: null,
     // herkes
-    lobby: null, view: null, chat: [], wasMyTurn: false,
+    lobby: null, view: null, chat: [], wasMyTurn: false, tab: null, unread: 0,
     reconnecting: false, retryTimer: null,
   };
 
@@ -483,6 +483,7 @@
     S.chat.push(m);
     if (S.chat.length > 100) S.chat.shift();
     renderChat();
+    chatArrived(m);
     if (S.role === 'host') {
       for (const s of S.seats) if (s && s.kind === 'remote' && s.connected) send(s.conn, { t: 'chat', m });
     }
@@ -624,25 +625,28 @@
     }).join('');
     const okCount = filled >= m.min && filled <= m.max;
     const need = m.min === m.max ? `${m.min} oyuncu` : `${m.min}-${m.max} oyuncu`;
-    let bottom;
-    if (L.playing) bottom = `<p class="waiting">Şu an <b>${MODES[L.playingMode].title}</b> oynanıyor. Kurucu lobiye dönünce sen de katılabilirsin.</p>`;
-    else if (host) bottom = `<button class="btn primary big" data-act="start" ${okCount ? '' : 'disabled'}>${okCount ? `${m.title} Başlat` : `${m.title} için ${need} gerekli (${filled} var)`}</button>`;
-    else bottom = `<p class="waiting">Kurucunun <b>${m.title}</b> oyununu başlatması bekleniyor… (${filled} kişi)</p>`;
+    let bottom, hud;
+    if (L.playing) {
+      bottom = hud = `<div class="hud-msg">Şu an <b>${MODES[L.playingMode].title}</b> oynanıyor. Kurucu lobiye dönünce sen de katılırsın.</div>`;
+    } else if (host) {
+      bottom = `<button class="btn primary big" data-act="start" ${okCount ? '' : 'disabled'}>${okCount ? `▶ ${m.title} Başlat` : `${m.title} için ${need} gerekli (${filled} var)`}</button>`;
+      hud = okCount
+        ? `<button class="btn primary start-btn" data-act="start">▶ ${m.title} Başlat</button>`
+        : `<div class="hud-msg">${m.title} için ${need} gerekli (${filled} var) <button class="btn sm" data-act="tab" data-k="game">Bot ekle</button></div>`;
+    } else {
+      bottom = hud = `<div class="hud-msg">Kurucunun <b>${m.title}</b> oyununu başlatması bekleniyor…</div>`;
+    }
 
     $('#lobbyCard').innerHTML = `
-      <div class="lb-code">
-        <small class="muted">Oda Kodu</small><div class="room-code">${esc(L.code)}</div>
-        <button class="btn sm" data-act="copyLink">Davet Linki</button>
-      </div>
-      <div class="lb-games">
-        <h3>Oyun ${host ? '' : '<span class="muted tiny">(kurucu seçer)</span>'}</h3>
-        <div class="game-picks">${games}</div>
-      </div>
-      <div class="lb-seats"><h3>Oyuncular</h3><ul class="seats">${seats}</ul></div>
-      <div class="lb-start">${bottom}
-        <button class="btn ghost sm" data-act="leave">${host ? 'Odayı Kapat' : 'Odadan Çık'}</button></div>`;
+      <h3>Oyun ${host ? '' : '<span class="muted tiny">(kurucu seçer)</span>'}</h3>
+      <div class="game-picks">${games}</div>
+      <h3>Oyuncular</h3><ul class="seats">${seats}</ul>
+      ${bottom}`;
+    $('#hudChip').innerHTML = `<span class="hc-code">${esc(L.code)}</span><span class="hc-sep">·</span>${filled} kişi<span class="hc-sep">·</span><b>${m.title}</b>`;
+    $('#hudStart').innerHTML = hud;
     $('#lookBar').innerHTML = lookBarHTML();
     Salon.setTV(L.playing ? `${MODES[L.playingMode].title} oynanıyor` : `Sıradaki: ${m.title}`);
+    renderRoom();
   }
 
   // ================= Oyun ekranı =================
@@ -673,23 +677,60 @@
     renderRoom();
   }
 
-  // Yan panel: oda, sesli sohbet, puan, olaylar, sohbet, görünüm
+  // Sağ üstte düğmeler; her biri tek paneli kendi sekmesiyle açar
+  const TABS = {
+    game: ['🎮', 'Oyun'], look: ['🙂', 'Karakterim'], scores: ['🏆', 'Puanlar'], log: ['📜', 'Olaylar'],
+    chat: ['💬', 'Sohbet'], voice: ['🎤', 'Ses'], room: ['👥', 'Oda'], theme: ['🎨', 'Görünüm'],
+  };
+
+  function availTabs() {
+    const inGameScreen = !!S.view && $('#game').classList.contains('active');
+    return inGameScreen ? ['scores', 'log', 'chat', 'voice', 'room', 'theme'] : ['game', 'look', 'chat', 'voice', 'room', 'theme'];
+  }
+
+  function openTab(k) {
+    S.tab = S.tab === k ? null : k;
+    if (S.tab === 'chat') {
+      S.unread = 0;
+      setTimeout(() => { $('#chatInput').focus(); $('#chatMsgs').scrollTop = 1e9; }, 0);
+    }
+    if (S.tab === 'log') setTimeout(() => { $('#log').scrollTop = 1e9; }, 0);
+    renderRoom();
+  }
+
   function renderRoom() {
     const inRoom = S.joined && !!S.lobby;
-    $('#side').hidden = !inRoom;
+    $('#dock').hidden = !inRoom;
     document.body.classList.toggle('in-room', inRoom);
-    if (!inRoom) return;
+    if (!inRoom) { $('#drawer').hidden = true; return; }
     const L = S.lobby, host = S.role === 'host';
+    const tabs = availTabs();
+    if (S.tab && !tabs.includes(S.tab)) S.tab = null;
+    const inGameScreen = tabs.includes('scores');
+
+    const lobbyBtn = host && L.playing && inGameScreen ? '<button class="dock-btn wide" data-act="toLobby" title="Oyunu bitir, lobiye dön">⟵ Lobi</button>' : '';
+    $('#dock').innerHTML = lobbyBtn + tabs.map(t => {
+      const badge = t === 'chat' && S.unread ? `<span class="dock-dot">${S.unread > 9 ? '9+' : S.unread}</span>` : '';
+      const live = t === 'voice' && Voice.on ? (Voice.muted ? ' muted' : ' live') : '';
+      return `<button class="dock-btn${S.tab === t ? ' on' : ''}${live}" data-act="tab" data-k="${t}" title="${TABS[t][1]}">${TABS[t][0]}${badge}</button>`;
+    }).join('') + `<button class="dock-btn menu-btn${S.tab ? ' on' : ''}" data-act="menu" title="Menü">☰${S.unread ? `<span class="dock-dot">${S.unread}</span>` : ''}</button>`;
+
+    $('#drawer').hidden = !S.tab;
+    $('#drawerTabs').innerHTML = tabs.map(t => `<button class="dtab ${S.tab === t ? 'on' : ''}" data-act="tab" data-k="${t}">${TABS[t][0]} <span>${TABS[t][1]}</span></button>`).join('');
+    document.querySelectorAll('.dpanel').forEach(p => { p.hidden = p.dataset.tab !== S.tab; });
+
     const players = L.seats.filter(Boolean).map(s => {
       const icon = s.kind === 'bot' ? '🤖' : s.voice ? (s.muted ? '🔇' : '🎤') : '👤';
       return `<span class="rp ${s.connected ? '' : 'off'}">${icon} ${esc(s.name)}</span>`;
     }).join('');
-    const playing = L.playing ? `<div class="row room-game"><span class="muted tiny">Oyun: <b>${MODES[L.playingMode].title}</b></span>
-      ${host ? '<button class="btn sm" data-act="toLobby">⟵ Lobiye Dön</button>' : ''}</div>` : '';
+    const playing = L.playing ? `<p class="muted">Oynanan: <b>${MODES[L.playingMode].title}</b></p>
+      ${host ? '<button class="btn sm" data-act="toLobby">⟵ Oyunu bitir, lobiye dön</button>' : ''}` : '';
     $('#roomPanel').innerHTML = `
-      <div class="room-head"><div><small>Oda</small> <b class="code-sm">${esc(S.code)}</b></div>
-        <button class="btn sm" data-act="copyLink">Davet</button></div>
-      <div class="room-players">${players}</div>${playing}`;
+      <small class="muted">Oda Kodu</small><div class="room-code">${esc(S.code)}</div>
+      <div class="row"><button class="btn sm primary" data-act="copyLink">🔗 Davet Linkini Kopyala</button></div>
+      <h3>Odadakiler</h3><div class="room-players">${players}</div>
+      ${playing}
+      <button class="btn ghost sm leave-btn" data-act="leave">${host ? 'Odayı Kapat' : 'Odadan Çık'}</button>`;
 
     const inVoice = L.seats.filter(s => s && s.voice);
     const list = inVoice.length
@@ -700,15 +741,25 @@
       : '<button class="btn sm primary" data-act="voiceJoin">🎤 Sese Katıl</button>';
     $('#voicePanel').innerHTML = `<h3>Sesli Sohbet ${Voice.on ? '<span class="live">● Açık</span>' : ''}</h3><div class="vlist">${list}</div><div class="row">${btns}</div>`;
     $('#themePanel').innerHTML = themeHTML();
-    const gameOn = !!S.view && $('#game').classList.contains('active');
-    $('#scoresPanel').hidden = !gameOn;
-    $('#logPanel').hidden = !gameOn;
   }
 
   function renderChat() {
     const el = $('#chatMsgs');
     el.innerHTML = S.chat.map(m => (m.name ? `<div><b>${esc(m.name)}:</b> ${esc(m.text)}</div>` : `<div class="sys">${esc(m.text)}</div>`)).join('');
     el.scrollTop = 1e9;
+  }
+
+  // Sohbet kapalıyken gelen mesaj köşede kısa süre görünür
+  let popTimer;
+  function chatArrived(m) {
+    if (!m.name || S.tab === 'chat' || m.name === S.name) return;
+    S.unread = (S.unread || 0) + 1;
+    const pop = $('#chatPop');
+    pop.innerHTML = `<b>${esc(m.name)}:</b> ${esc(m.text)}`;
+    pop.classList.add('show');
+    clearTimeout(popTimer);
+    popTimer = setTimeout(() => pop.classList.remove('show'), 4500);
+    renderRoom();
   }
 
   let audioCtx;
@@ -781,6 +832,10 @@
         break;
       case 'voiceLeave': store.set('okey101-voice', '0'); Voice.leave(); break;
       case 'voiceMute': Voice.toggleMute(); break;
+      case 'tab': openTab(b.dataset.k); break;
+      case 'menu': openTab(S.tab || availTabs()[0]); break;
+      case 'closeDrawer': S.tab = null; renderRoom(); break;
+      case 'toggleEmotes': $('#emoteBar').classList.toggle('open'); break;
       case 'setColor': setLook({ c: +b.dataset.k }); break;
       case 'setHat': setLook({ h: +b.dataset.k }); break;
       case 'setTable': store.set('okey101-table', b.dataset.k); applyTheme(); renderRoom(); break;
@@ -792,6 +847,10 @@
     e.preventDefault();
     sendChat($('#chatInput').value);
     $('#chatInput').value = '';
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && S.tab) { S.tab = null; renderRoom(); document.activeElement.blur(); }
   });
 
   $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.querySelector('[data-act="join"]').click(); });

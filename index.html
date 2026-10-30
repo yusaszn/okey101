@@ -4,109 +4,115 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Oyun Odası — Okey 101 · Pis Yedili · Blackjack</title>
-  <link rel="stylesheet" href="css/style.css?v=3">
+  <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
   <div class="app">
-    <main class="main">
-      <!-- Giriş -->
-      <section id="menu" class="screen active">
-        <div class="card menu-card">
-          <h1><span class="logo-tile">101</span> Oyun Odası</h1>
-          <p class="sub">Okey 101, Pis Yedili ve Blackjack. Oda kur, linki arkadaşlarına at, sesli sohbetle oyna.</p>
-          <label>Adın <input id="name" maxlength="16" placeholder="Takma adın" autocomplete="off"></label>
-          <button class="btn primary big" data-act="create">Oda Kur</button>
-          <div class="or">ya da</div>
-          <div class="join-row">
-            <input id="code" maxlength="6" placeholder="ODA KODU" autocomplete="off">
-            <button class="btn big" data-act="join">Katıl</button>
-          </div>
-          <p id="menuMsg" class="muted"></p>
+    <!-- Giriş -->
+    <section id="menu" class="screen active">
+      <div class="card menu-card">
+        <h1><span class="logo-tile">101</span> Oyun Odası</h1>
+        <p class="sub">Okey 101, Pis Yedili ve Blackjack. Oda kur, linki arkadaşlarına at, sesli sohbetle oyna.</p>
+        <label>Adın <input id="name" maxlength="16" placeholder="Takma adın" autocomplete="off"></label>
+        <button class="btn primary big" data-act="create">Oda Kur</button>
+        <div class="or">ya da</div>
+        <div class="join-row">
+          <input id="code" maxlength="6" placeholder="ODA KODU" autocomplete="off">
+          <button class="btn big" data-act="join">Katıl</button>
         </div>
-      </section>
-
-      <!-- Lobi -->
-      <section id="lobby" class="screen">
-        <div class="lobby-wrap">
-          <div class="card lobby-card" id="lobbyCard"></div>
-          <div class="salon-wrap">
-            <canvas id="salon"></canvas>
-            <div class="salon-ui" id="salonUI">
-              <button class="tidy-btn" data-salon="tidy" title="Devrilen eşyaları yerine koy">🧹 Salonu Topla</button>
-              <div class="emote-bar">
-                <button data-salon="emote:0" title="1">👋</button><button data-salon="emote:1" title="2">😂</button><button data-salon="emote:2" title="3">❤️</button>
-                <button data-salon="emote:3" title="4">😜</button><button data-salon="emote:4" title="5">😡</button><button data-salon="emote:5" title="6">🎉</button>
-              </div>
-              <div class="joy"><div class="joy-knob"></div></div>
-              <div class="salon-btns">
-                <button class="sbtn" data-salon="grab">✋<small>Tut</small></button>
-                <button class="sbtn" data-salon="shove">💥<small>İt</small></button>
-              </div>
-            </div>
-          </div>
-          <div class="salon-foot">
-            <div id="lookBar" class="look-bar"></div>
-            <div class="salon-help">⌨️ <b>WASD / Oklar</b> yürü · <b>Boşluk</b> tut / bırak · <b>Shift</b> it (tutarken fırlat) · <b>1-6</b> ifade</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Oyun -->
-      <section id="game" class="screen">
-        <div id="okeyBoard" class="board">
-          <div class="pos top" id="pTop"></div>
-          <div class="pos left" id="pLeft"></div>
-          <div class="pos right" id="pRight"></div>
-          <div class="center">
-            <div class="center-bar" id="centerBar"></div>
-            <div class="table-groups" id="tableGroups"></div>
-          </div>
-          <div class="me">
-            <div class="me-bar">
-              <div id="meInfo" class="me-info"></div>
-              <div id="status" class="status"></div>
-              <div id="actions" class="actions"></div>
-            </div>
-            <div class="rack-wrap">
-              <div id="rack" class="rack"></div>
-              <div id="myDiscard" class="drop-discard" data-drop="discard"></div>
-            </div>
-          </div>
-        </div>
-        <div id="modeBoard" class="mode-board" hidden></div>
-      </section>
-    </main>
-
-    <aside class="side" id="side" hidden>
-      <div class="panel" id="roomPanel"></div>
-      <div class="panel" id="voicePanel"></div>
-      <div class="panel" id="scoresPanel" hidden><div id="scores"></div></div>
-      <div class="panel grow" id="logPanel" hidden>
-        <h3>Olaylar</h3>
-        <div id="log" class="log"></div>
+        <p id="menuMsg" class="muted"></p>
       </div>
-      <div class="panel grow">
-        <h3>Sohbet</h3>
-        <div id="chatMsgs" class="log"></div>
+    </section>
+
+    <!-- Lobi: tam ekran salon -->
+    <section id="lobby" class="screen">
+      <div class="salon-wrap">
+        <canvas id="salon"></canvas>
+        <div class="salon-ui" id="salonUI">
+          <div class="joy"><div class="joy-knob"></div></div>
+          <div class="salon-right">
+            <div class="emote-bar" id="emoteBar">
+              <button data-salon="emote:0" title="1">👋</button><button data-salon="emote:1" title="2">😂</button><button data-salon="emote:2" title="3">❤️</button>
+              <button data-salon="emote:3" title="4">😜</button><button data-salon="emote:4" title="5">😡</button><button data-salon="emote:5" title="6">🎉</button>
+            </div>
+            <div class="mini-btns">
+              <button class="mbtn" data-act="toggleEmotes" title="İfadeler (1-6)">😀</button>
+              <button class="mbtn" data-salon="tidy" title="Salonu topla">🧹</button>
+            </div>
+            <div class="salon-btns">
+              <button class="sbtn" data-salon="grab" title="Tut / bırak (Boşluk)">✋<small>Tut</small></button>
+              <button class="sbtn" data-salon="shove" title="İt, tutarken fırlat (Shift)">💥<small>İt</small></button>
+            </div>
+          </div>
+        </div>
+        <div class="hud-chip" id="hudChip"></div>
+        <div class="hud-start" id="hudStart"></div>
+        <div class="salon-help">⌨️ <b>WASD</b> yürü · <b>Boşluk</b> tut · <b>Shift</b> it / fırlat · <b>1-6</b> ifade</div>
+      </div>
+    </section>
+
+    <!-- Oyun -->
+    <section id="game" class="screen">
+      <div id="okeyBoard" class="board">
+        <div class="pos top" id="pTop"></div>
+        <div class="pos left" id="pLeft"></div>
+        <div class="pos right" id="pRight"></div>
+        <div class="center">
+          <div class="center-bar" id="centerBar"></div>
+          <div class="table-groups" id="tableGroups"></div>
+        </div>
+        <div class="me">
+          <div class="me-bar">
+            <div id="meInfo" class="me-info"></div>
+            <div id="status" class="status"></div>
+            <div id="actions" class="actions"></div>
+          </div>
+          <div class="rack-wrap">
+            <div id="rack" class="rack"></div>
+            <div id="myDiscard" class="drop-discard" data-drop="discard"></div>
+          </div>
+        </div>
+      </div>
+      <div id="modeBoard" class="mode-board" hidden></div>
+    </section>
+  </div>
+
+  <!-- Sağ üst düğmeler ve tek sekmeli panel -->
+  <nav id="dock" class="dock" hidden></nav>
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <div class="drawer-tabs" id="drawerTabs"></div>
+      <button class="drawer-x" data-act="closeDrawer" title="Kapat">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="dpanel" data-tab="game" id="lobbyCard"></div>
+      <div class="dpanel" data-tab="look" id="lookBar"></div>
+      <div class="dpanel" data-tab="chat">
+        <div id="chatMsgs" class="log chat-log"></div>
         <form id="chatForm" class="chat-form"><input id="chatInput" maxlength="200" placeholder="Mesaj yaz…" autocomplete="off"><button class="btn sm">Gönder</button></form>
       </div>
-      <div class="panel" id="themePanel"></div>
-    </aside>
+      <div class="dpanel" data-tab="voice" id="voicePanel"></div>
+      <div class="dpanel" data-tab="room" id="roomPanel"></div>
+      <div class="dpanel" data-tab="theme" id="themePanel"></div>
+      <div class="dpanel" data-tab="scores"><div id="scores"></div></div>
+      <div class="dpanel" data-tab="log"><div id="log" class="log"></div></div>
+    </div>
   </div>
+  <div id="chatPop" class="chat-pop"></div>
 
   <div id="modal" class="modal hidden"><div class="card modal-card" id="modalCard"></div></div>
   <div id="overlay" class="modal hidden"><div class="card modal-card" id="overlayCard"></div></div>
   <div id="toast" class="toast"></div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="js/cards.js?v=3"></script>
-  <script src="js/rules.js?v=3"></script>
-  <script src="js/engine.js?v=3"></script>
-  <script src="js/okey-ui.js?v=3"></script>
-  <script src="js/yedili.js?v=3"></script>
-  <script src="js/blackjack.js?v=3"></script>
-  <script src="js/voice.js?v=3"></script>
-  <script src="js/salon.js?v=3"></script>
-  <script src="js/app.js?v=3"></script>
+  <script src="js/cards.js?v=4"></script>
+  <script src="js/rules.js?v=4"></script>
+  <script src="js/engine.js?v=4"></script>
+  <script src="js/okey-ui.js?v=4"></script>
+  <script src="js/yedili.js?v=4"></script>
+  <script src="js/blackjack.js?v=4"></script>
+  <script src="js/voice.js?v=4"></script>
+  <script src="js/salon.js?v=4"></script>
+  <script src="js/app.js?v=4"></script>
 </body>
 </html>

@@ -723,7 +723,7 @@
       ox = Math.max(cv.width - W * sc, Math.min(0, V.camX));
     }
     c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = '#ffb3cf';
+    c.fillStyle = '#3b2a4d';
     c.fillRect(0, 0, cv.width, cv.height);
     c.setTransform(sc, 0, 0, sc, ox, (cv.height - H * sc) / 2);
     drawRoom(c);
