@@ -4,13 +4,14 @@
   'use strict';
   const MODES = window.GameModes;
   const Voice = window.Voice;
+  const Salon = window.Salon;
 
   const PREFIX = 'ys-okey101-';
   const PEER_OPTS = { debug: 1 };
   const MODE_ORDER = ['okey', 'yedili', 'blackjack'];
   const MODE_ICONS = { okey: '<span class="gi gi-okey">101</span>', yedili: '<span class="gi gi-card">7♥</span>', blackjack: '<span class="gi gi-bj">21</span>' };
   const BOT_NAMES = ['Bot Ali', 'Bot Ayşe', 'Bot Mehmet', 'Bot Zeynep', 'Bot Can', 'Bot Elif'];
-  const HOST_SAVE = 'okey101-host', ALIVE_KEY = 'okey101-alive', SESSION = 'okey101-session', NAME_KEY = 'okey101-name';
+  const LOOK_KEY = 'okey101-look', HOST_SAVE = 'okey101-host', ALIVE_KEY = 'okey101-alive', SESSION = 'okey101-session', NAME_KEY = 'okey101-name';
   const TABLES = [
     ['okyanus', 'Okyanus'], ['gece', 'Gece Mavisi'], ['mor', 'Mor'], ['gunbatimi', 'Gün Batımı'],
     ['bordo', 'Bordo'], ['yesil', 'Klasik Yeşil'],
@@ -34,7 +35,7 @@
     peer: null, conn: null,
     // kurucu
     seats: [null, null, null, null], mode: 'okey', game: null, order: null, gameSeq: 0,
-    botTimer: null, dropTimers: {}, retry: 0,
+    botTimer: null, dropTimers: {}, retry: 0, sim: null, simTimer: null,
     // herkes
     lobby: null, view: null, chat: [], wasMyTurn: false,
     reconnecting: false, retryTimer: null,
@@ -51,6 +52,7 @@
   function show(id) {
     document.querySelectorAll('.screen').forEach(el => el.classList.toggle('active', el.id === id));
     if (id !== 'game') $('#modal').classList.add('hidden');
+    Salon.setActive(id === 'lobby');
     renderRoom();
   }
 
@@ -100,6 +102,57 @@
     Voice.join().catch(e => toast('Mikrofon açılamadı: ' + (e.message || e.name) + ' — Sesli sohbet panelinden tekrar deneyebilirsin.'));
   }
 
+  // ================= Karakter görünümü =================
+  function myLook() {
+    let l = readJSON(store, LOOK_KEY);
+    if (!l || !Number.isInteger(l.c)) {
+      l = { c: Math.floor(Math.random() * Salon.COLORS.length), h: 0 };
+      store.set(LOOK_KEY, JSON.stringify(l));
+    }
+    return cleanLook(l);
+  }
+
+  function cleanLook(l) {
+    const c = Math.floor(Number(l && l.c)), h = Math.floor(Number(l && l.h));
+    return { c: c >= 0 && c < Salon.COLORS.length ? c : 0, h: h >= 0 && h < Salon.HATS.length ? h : 0 };
+  }
+
+  function setLook(patch) {
+    const l = Object.assign(myLook(), patch);
+    store.set(LOOK_KEY, JSON.stringify(l));
+    if (S.role === 'host') { S.seats[0].look = cleanLook(l); hostSync(); }
+    else send(S.conn, { t: 'look', ...l });
+  }
+
+  function lookBarHTML() {
+    const l = myLook();
+    return `<b>Karakterim</b>
+      <div class="swatches">${Salon.COLORS.map((col, i) => `<button class="sw ${i === l.c ? 'sel' : ''}" style="background:${col}" data-act="setColor" data-k="${i}" title="Renk"></button>`).join('')}</div>
+      <div class="hats">${Salon.HATS.map((h, i) => `<button class="hat-btn ${i === l.h ? 'sel' : ''}" data-act="setHat" data-k="${i}">${Salon.HAT_NAMES[h]}</button>`).join('')}</div>`;
+  }
+
+  // ================= Salon (kurucuda fizik) =================
+  function startSim() {
+    if (S.sim) return;
+    S.sim = new Salon.Sim();
+    let n = 0;
+    S.simTimer = setInterval(() => {
+      const sim = S.sim;
+      S.seats.forEach((s, i) => {
+        const here = s && (s.kind !== 'remote' || s.connected) && !inGame(i);
+        if (here) sim.ensure(i, s.kind === 'bot'); else sim.remove(i);
+      });
+      sim.step(1 / 30);
+      if (++n % 2) return;
+      const snap = sim.snapshot();
+      S.seats.forEach((s, i) => {
+        if (!s || inGame(i)) return;
+        if (s.kind === 'host') Salon.setSnapshot(snap);
+        else if (s.kind === 'remote' && s.connected) send(s.conn, { t: 'sw', s: snap });
+      });
+    }, 1000 / 30);
+  }
+
   // ================= Tema =================
   function applyTheme() {
     document.body.dataset.table = store.get('okey101-table') || 'okyanus';
@@ -134,6 +187,8 @@
       S.joined = true;
       if (!restore) S.seats = [{ name: S.name, kind: 'host', connected: true }, null, null, null];
       else Object.assign(S.seats[0], { kind: 'host', connected: true, voice: false, muted: false });
+      S.seats[0].look = myLook();
+      startSim();
       sstore.set(SESSION, JSON.stringify({ code: S.code, role: 'host', name: S.name }));
       history.replaceState(null, '', '?oda=' + S.code);
       $('#menuMsg').textContent = '';
@@ -174,7 +229,7 @@
     S.name = saved.name;
     S.code = saved.code;
     S.mode = MODES[saved.mode] ? saved.mode : 'okey';
-    S.seats = saved.seats.map(s => s && { name: s.name, kind: s.kind, connected: s.kind !== 'remote', conn: null });
+    S.seats = saved.seats.map(s => s && { name: s.name, kind: s.kind, look: s.look, connected: s.kind !== 'remote', conn: null });
     S.order = saved.order || null;
     S.gameSeq = saved.gameSeq || 1;
     S.chat = saved.chat || [];
@@ -191,7 +246,7 @@
     try {
       store.set(HOST_SAVE, JSON.stringify({
         code: S.code, name: S.name, mode: S.mode, at: Date.now(), gameSeq: S.gameSeq,
-        seats: S.seats.map(s => s && { name: s.name, kind: s.kind }),
+        seats: S.seats.map(s => s && { name: s.name, kind: s.kind, look: s.look }),
         order: S.order, game: S.game, chat: S.chat.slice(-40),
       }));
     } catch (e) { console.warn('kaydedilemedi', e); }
@@ -220,6 +275,13 @@
       s.voice = !!msg.on;
       s.muted = !!msg.muted;
       hostSync();
+    } else if (msg.t === 'look') {
+      s.look = cleanLook(msg);
+      hostSync();
+    } else if (msg.t === 'sin') {
+      if (S.sim) S.sim.input(seat, msg.dx, msg.dy);
+    } else if (msg.t === 'sact') {
+      if (S.sim && ['grab', 'shove', 'emote', 'tidy'].includes(msg.a)) S.sim.action(seat, msg.a, msg.arg);
     }
   }
 
@@ -278,7 +340,7 @@
     return S.seats.map(s => s && {
       name: s.name, kind: s.kind, connected: !!s.connected,
       peerId: s.kind === 'host' ? (S.peer && S.peer.id) : s.peerId,
-      voice: !!s.voice, muted: !!s.muted,
+      voice: !!s.voice, muted: !!s.muted, look: s.look || null,
     });
   }
 
@@ -500,6 +562,7 @@
         history.replaceState(null, '', '?oda=' + S.code);
         $('#menuMsg').textContent = '';
         $('#overlay').classList.add('hidden');
+        send(S.conn, { t: 'look', ...myLook() });
         autoVoice();
         break;
       case 'reject':
@@ -518,8 +581,10 @@
         S.wasMyTurn = false;
         document.title = 'Oyun Odası';
         Voice.setRoom(msg.lobby.seats);
+        Salon.setRoom(msg.lobby.seats, S.seat);
         renderLobby();
         break;
+      case 'sw': Salon.setSnapshot(msg.s); break;
       case 'state':
         S.lobby = msg.lobby;
         Voice.setRoom(msg.lobby.seats);
@@ -565,17 +630,19 @@
     else bottom = `<p class="waiting">Kurucunun <b>${m.title}</b> oyununu başlatması bekleniyor… (${filled} kişi)</p>`;
 
     $('#lobbyCard').innerHTML = `
-      <div class="lobby-head">
-        <div><small class="muted">Oda Kodu</small><div class="room-code">${esc(L.code)}</div></div>
-        <button class="btn sm" data-act="copyLink">Davet Linkini Kopyala</button>
+      <div class="lb-code">
+        <small class="muted">Oda Kodu</small><div class="room-code">${esc(L.code)}</div>
+        <button class="btn sm" data-act="copyLink">Davet Linki</button>
       </div>
-      <h3>Oyun Seç</h3>
-      <div class="game-picks">${games}</div>
-      ${host ? '' : '<p class="muted tiny">Oyunu kurucu seçer.</p>'}
-      <h3>Oyuncular</h3>
-      <ul class="seats">${seats}</ul>
-      ${bottom}
-      <button class="btn ghost sm" data-act="leave">${host ? 'Odayı Kapat' : 'Odadan Çık'}</button>`;
+      <div class="lb-games">
+        <h3>Oyun ${host ? '' : '<span class="muted tiny">(kurucu seçer)</span>'}</h3>
+        <div class="game-picks">${games}</div>
+      </div>
+      <div class="lb-seats"><h3>Oyuncular</h3><ul class="seats">${seats}</ul></div>
+      <div class="lb-start">${bottom}
+        <button class="btn ghost sm" data-act="leave">${host ? 'Odayı Kapat' : 'Odadan Çık'}</button></div>`;
+    $('#lookBar').innerHTML = lookBarHTML();
+    Salon.setTV(L.playing ? `${MODES[L.playingMode].title} oynanıyor` : `Sıradaki: ${m.title}`);
   }
 
   // ================= Oyun ekranı =================
@@ -714,6 +781,8 @@
         break;
       case 'voiceLeave': store.set('okey101-voice', '0'); Voice.leave(); break;
       case 'voiceMute': Voice.toggleMute(); break;
+      case 'setColor': setLook({ c: +b.dataset.k }); break;
+      case 'setHat': setLook({ h: +b.dataset.k }); break;
       case 'setTable': store.set('okey101-table', b.dataset.k); applyTheme(); renderRoom(); break;
       case 'setRack': store.set('okey101-rack', b.dataset.k); applyTheme(); renderRoom(); break;
     }
@@ -728,11 +797,18 @@
   $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.querySelector('[data-act="join"]').click(); });
 
   Voice.onChange = renderRoom;
+  Salon.mount($('#salon'), $('#salonUI'));
+  Salon.onInput = (dx, dy) => {
+    if (S.role === 'host') { if (S.sim) S.sim.input(0, dx, dy); } else send(S.conn, { t: 'sin', dx, dy });
+  };
+  Salon.onAction = (a, arg) => {
+    if (S.role === 'host') { if (S.sim) S.sim.action(0, a, arg); } else send(S.conn, { t: 'sact', a, arg });
+  };
 
   // ================= Başlangıç =================
   applyTheme();
   $('#name').value = store.get(NAME_KEY) || '';
-  if (location.hash === '#debug') window.__app = S;
+  if (location.hash === '#debug' || store.get('okey101-debug')) window.__app = S;
   if (typeof Peer === 'undefined') {
     $('#menuMsg').textContent = 'PeerJS yüklenemedi. İnternet bağlantını kontrol et.';
   } else {

@@ -23,6 +23,16 @@ Tarayıcıdan oynanan online oyun odası: **Okey 101**, **Pis Yedili** ve **Blac
 - **Görünüm**: yan panelden masa ve ıstaka rengi seçilir, her oyuncunun kendi tarayıcısında hatırlanır.
 - Kurucu sayfayı yenilerse oda ve oyun kaldığı yerden devam eder; diğer oyuncular kendiliğinden yeniden bağlanır.
 
+## Salon (lobi)
+
+Lobi, odadaki herkesin tombul karakteriyle dolaştığı bir ev salonudur (botlar da dolaşır).
+
+- **WASD / Oklar**: yürü · **Boşluk**: yakındakini tut / bırak · **Shift** (veya F): it, birini tutarken basarsan fırlat · **1-6**: ifade
+- Tutulan kişi yön tuşlarına basarak debelenir ve kurtulur. İtilen ya da fırlatılan sersemler.
+- Saksılar, lamba ve vazo çarpınca devrilir; "Salonu Topla" hepsini yerine koyar.
+- Alttaki "Karakterim" bölümünden renk ve şapka seçilir.
+- Telefonda ekrandaki joystick ve Tut / İt düğmeleri kullanılır, kamera karakterini takip eder.
+
 ## Pis Yedili
 
 7: sıradaki 3 kart çeker (7'ler üst üste biner) · 8: sıradaki atlanır · 10: yön değişir · Vale: her kartın üstüne gider, rengi seçer. Tek kart kalınca "Son Kart!" denmezse yakalanan 2 kart çeker. Kalan kartlar ceza puanı; en düşük puan önde.
@@ -66,8 +76,9 @@ Sonra tarayıcıda `http://localhost:8101` adresini aç.
 
 - `js/app.js`: oda sistemi (PeerJS), lobi, sohbet, tema, yeniden bağlanma
 - `js/voice.js`: sesli sohbet
+- `js/salon.js`: salon lobisi (fizik, karakterler, kontroller)
 - `js/rules.js`, `js/engine.js`, `js/okey-ui.js`: Okey 101 kuralları, motoru ve arayüzü
 - `js/cards.js`, `js/yedili.js`, `js/blackjack.js`: iskambil oyunları
 - `css/style.css`: görünüm ve temalar
 
-Yeni sürüm yayınlarken `index.html` içindeki `?v=2` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.
+Yeni sürüm yayınlarken `index.html` içindeki `?v=3` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.
