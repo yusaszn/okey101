@@ -164,6 +164,16 @@
       this.events.push(['crash', o.x, o.y - 20]);
     }
 
+    // Oyun başlarken herkes sehpanın başına yürür
+    gather(seats) {
+      const spots = [[465, 455], [735, 455], [600, 382], [600, 530]];
+      this.gatherAt = new Map();
+      seats.forEach((seat, i) => this.gatherAt.set(seat, spots[i % spots.length]));
+      for (const p of this.players.values()) { this._release(p); p.stun = 0; }
+    }
+
+    ungather() { this.gatherAt = null; }
+
     _tidy() {
       for (const o of this.items) Object.assign(o, { x: o.hx, y: o.hy, vx: 0, vy: 0, rot: 0, vr: 0, fallen: false });
       for (const p of this.players.values()) if (p.grab && p.grab.t === 'i') this._release(p);
@@ -204,6 +214,18 @@
         p.cd = Math.max(0, p.cd - dt);
         p.stun = Math.max(0, p.stun - dt);
         if (p.emoteT > 0) p.emoteT -= dt; else p.emote = -1;
+        const spot = this.gatherAt && this.gatherAt.get(p.seat);
+        if (spot) {
+          // Çarpışmasız yürüyerek yerine geçer, sehpaya döner
+          const tx = spot[0] - p.x, ty = spot[1] - p.y, d = Math.hypot(tx, ty);
+          const sp = Math.min(320, d * 4);
+          p.vx = d > 1 ? tx / d * sp : 0;
+          p.vy = d > 1 ? ty / d * sp : 0;
+          p.face = d > 8 ? Math.atan2(ty, tx) : Math.atan2(450 - p.y, 600 - p.x);
+          p.ghost = true;
+          continue;
+        }
+        p.ghost = false;
         if (p.bot) this._bot(p, dt);
         let { dx, dy } = p.in;
         if (p.stun > 0) dx = dy = 0;
@@ -261,6 +283,7 @@
       for (let i = 0; i < all.length; i++) {
         for (let j = i + 1; j < all.length; j++) {
           const a = all[i], b = all[j];
+          if (a.ghost || b.ghost) continue;
           let nx = b.x - a.x, ny = b.y - a.y;
           const d = Math.hypot(nx, ny), min = a.r + b.r;
           if (d >= min || d === 0) continue;
@@ -283,6 +306,7 @@
 
       // Duvarlar ve mobilyalar
       for (const b of all) {
+        if (b.ghost) continue;
         for (const s of SOLIDS) this._rect(b, s);
         const minX = 20 + b.r, maxX = W - 20 - b.r, minY = WALL + 4, maxY = H - 14;
         if (b.x < minX) { b.x = minX; this._wallHit(b, 'x'); }
@@ -333,6 +357,7 @@
         ]),
         i: this.items.map(o => [r(o.x), r(o.y), r(o.vx), r(o.vy), r(o.rot * 100), o.fallen ? 1 : 0]),
         e: this.events.splice(0),
+        cd: this.countdown === undefined ? -1 : this.countdown,
       };
     }
   }
@@ -364,6 +389,11 @@
     V.snap = s;
     V.snapAt = performance.now();
     for (const ev of s.e || []) addFx(ev);
+    const cd = s.cd === undefined ? -1 : s.cd;
+    if (cd !== V.lastCd) {
+      if (cd >= 0) { V.cdAt = performance.now(); if (V.active) sound(cd === 0 ? 'go' : 'tick'); }
+      V.lastCd = cd;
+    }
   }
 
   function lookOf(seat) {
@@ -402,7 +432,7 @@
       }
       const o = actx.createOscillator();
       o.connect(g);
-      const map = { pat: [320, 90, 0.15], bump: [500, 180, 0.25], throw: [700, 200, 0.3], grab: [600, 900, 0.08], free: [400, 800, 0.15], pop: [300, 700, 0.1], tidy: [500, 1000, 0.2], whoosh: [200, 120, 0.12] };
+      const map = { tick: [660, 660, 0.12], go: [520, 1040, 0.35], pat: [320, 90, 0.15], bump: [500, 180, 0.25], throw: [700, 200, 0.3], grab: [600, 900, 0.08], free: [400, 800, 0.15], pop: [300, 700, 0.1], tidy: [500, 1000, 0.2], whoosh: [200, 120, 0.12] };
       const [a, b, dur] = map[k] || [400, 300, 0.1];
       o.type = k === 'bump' ? 'sine' : 'triangle';
       o.frequency.setValueAtTime(a, now);
@@ -780,6 +810,29 @@
       c.fillStyle = f.k === 'crash' ? '#e03131' : f.k === 'tidy' ? '#2b8a3e' : '#7048e8';
       c.fillText(f.text, 0, 0);
       c.restore();
+    }
+    // 3-2-1 geri sayım
+    if (s && s.cd >= 0) {
+      const ph = Math.min(1, (now - (V.cdAt || now)) / 250);
+      const txt = s.cd === 0 ? 'BAŞLA!' : String(s.cd);
+      c.save();
+      c.fillStyle = 'rgba(30,10,60,.25)';
+      c.fillRect(0, 0, W, H);
+      c.translate(W / 2, H / 2 - 40);
+      c.scale(0.6 + ph * 0.4 + (1 - ph) * 0.6, 0.6 + ph * 0.4 + (1 - ph) * 0.6);
+      ell(c, 0, 0, s.cd === 0 ? 150 : 90, 90, 'rgba(255,255,255,.9)');
+      c.font = `900 ${s.cd === 0 ? 64 : 110}px system-ui, sans-serif`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillStyle = s.cd === 0 ? '#2b8a3e' : '#7048e8';
+      c.fillText(txt, 0, 6);
+      c.restore();
+      c.font = 'bold 22px system-ui, sans-serif';
+      c.textAlign = 'center';
+      c.lineWidth = 5; c.strokeStyle = 'rgba(0,0,0,.35)';
+      c.strokeText('Herkes masaya!', W / 2, H / 2 + 80);
+      c.fillStyle = '#fff';
+      c.fillText('Herkes masaya!', W / 2, H / 2 + 80);
     }
     if (!s) {
       c.fillStyle = 'rgba(0,0,0,.4)'; c.font = 'bold 22px system-ui'; c.textAlign = 'center';

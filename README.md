@@ -1,6 +1,6 @@
-# Oyun Odası — Okey 101 · Pis Yedili · Blackjack
+# Oyun Odası — Okey 101 · Renk Fırtınası · Pis Yedili · Blackjack
 
-Tarayıcıdan oynanan online oyun odası: **Okey 101**, **Pis Yedili** ve **Blackjack**. Oda kalıcıdır: oyun bitince lobiye dönülür, yeni oda kurmadan başka oyuna geçilir. Sesli sohbet oda boyunca açık kalır. Sunucu gerektirmez: oda kuran oyuncunun tarayıcısı oyunu yönetir, diğerleri PeerJS (WebRTC) ile doğrudan ona bağlanır. Bu yüzden GitHub Pages gibi statik bir yerde çalışır.
+Tarayıcıdan oynanan online oyun odası: **Okey 101**, **Renk Fırtınası**, **Pis Yedili** ve **Blackjack**. Oda kalıcıdır: oyun bitince lobiye dönülür, yeni oda kurmadan başka oyuna geçilir. Sesli sohbet oda boyunca açık kalır. Sunucu gerektirmez: oda kuran oyuncunun tarayıcısı oyunu yönetir, diğerleri PeerJS (WebRTC) ile doğrudan ona bağlanır. Bu yüzden GitHub Pages gibi statik bir yerde çalışır.
 
 ## Nasıl oynanır
 
@@ -17,7 +17,7 @@ Tarayıcıdan oynanan online oyun odası: **Okey 101**, **Pis Yedili** ve **Blac
 
 ## Oda ve lobi
 
-- Kurucu lobide oyunu seçer (Okey 101: 4 kişi, Pis Yedili: 2-4, Blackjack: 1-4) ve başlatır. Boş koltuklara bot eklenebilir.
+- Kurucu lobide oyunu seçer (Okey 101: 4 kişi, Renk Fırtınası ve Pis Yedili: 2-4, Blackjack: 1-4) ve başlatır. Başlat'a basınca herkes salondaki sehpanın başına toplanır, 3-2-1 geri sayımla oyun açılır. Boş koltuklara bot eklenebilir.
 - Oyun bitince "Lobiye Dön" ile aynı odada başka oyuna geçilir. Oyun sürerken gelen kişi lobide bekler.
 - **Sesli sohbet** odaya girince otomatik açılır (mikrofon izni ister). Sessize alma ve sesten çıkma yan panelde.
 - **Görünüm**: yan panelden masa ve ıstaka rengi seçilir, her oyuncunun kendi tarayıcısında hatırlanır.
@@ -32,6 +32,15 @@ Lobi, odadaki herkesin tombul karakteriyle dolaştığı bir ev salonudur (botla
 - Saksılar, lamba ve vazo çarpınca devrilir; "Salonu Topla" hepsini yerine koyar.
 - Sağ üstteki 🙂 Karakterim düğmesinden renk ve şapka seçilir. Oyun seçimi, sohbet, ses, oda ve görünüm de sağ üstteki düğmelerdedir; telefonda ☰ menüde toplanır.
 - Telefonda ekrandaki joystick ve Tut / İt düğmeleri kullanılır, kamera karakterini takip eder.
+
+## Renk Fırtınası
+
+Bize özgü renkli kart oyunu (2-4 kişi). Pembe, turuncu, yeşil ve mor renklerde 1-9 sayılar ve özel kartlar. Aynı renk ya da aynı sayı/simge atılır.
+
+- ❄ **Dondur**: sıradaki atlanır · 💣 **Bomba**: diğer herkes 1 kart çeker · 🌪 **Kasırga**: herkes elini sıradakine verir
+- 🌈 **Gökkuşağı**: renk seçersin · ⚡ **Şimşek**: renk seçip bir daha oynarsın
+- Tek kart kalınca "Son Kart!" de; demezsen yakalanırsın (+2 kart).
+- Elini bitiren, diğerlerinin elindeki kartlar kadar puan alır (sayılar kendi değeri, özel 15, Gökkuşağı/Şimşek 25). En yüksek puan önde.
 
 ## Pis Yedili
 
@@ -78,6 +87,7 @@ Sonra tarayıcıda `http://localhost:8101` adresini aç.
 - `js/voice.js`: sesli sohbet
 - `js/salon.js`: salon lobisi (fizik, karakterler, kontroller)
 - `js/rules.js`, `js/engine.js`, `js/okey-ui.js`: Okey 101 kuralları, motoru ve arayüzü
+- `js/firtina.js`: Renk Fırtınası
 - `js/cards.js`, `js/yedili.js`, `js/blackjack.js`: iskambil oyunları
 - `css/style.css`: görünüm ve temalar
 

@@ -8,8 +8,8 @@
 
   const PREFIX = 'ys-okey101-';
   const PEER_OPTS = { debug: 1 };
-  const MODE_ORDER = ['okey', 'yedili', 'blackjack'];
-  const MODE_ICONS = { okey: '<span class="gi gi-okey">101</span>', yedili: '<span class="gi gi-card">7♥</span>', blackjack: '<span class="gi gi-bj">21</span>' };
+  const MODE_ORDER = ['okey', 'firtina', 'yedili', 'blackjack'];
+  const MODE_ICONS = { firtina: '<span class="gi gi-firtina">⚡</span>', okey: '<span class="gi gi-okey">101</span>', yedili: '<span class="gi gi-card">7♥</span>', blackjack: '<span class="gi gi-bj">21</span>' };
   const BOT_NAMES = ['Bot Ali', 'Bot Ayşe', 'Bot Mehmet', 'Bot Zeynep', 'Bot Can', 'Bot Elif'];
   const LOOK_KEY = 'okey101-look', HOST_SAVE = 'okey101-host', ALIVE_KEY = 'okey101-alive', SESSION = 'okey101-session', NAME_KEY = 'okey101-name';
   const TABLES = [
@@ -35,7 +35,7 @@
     peer: null, conn: null,
     // kurucu
     seats: [null, null, null, null], mode: 'okey', game: null, order: null, gameSeq: 0,
-    botTimer: null, dropTimers: {}, retry: 0, sim: null, simTimer: null,
+    botTimer: null, dropTimers: {}, retry: 0, sim: null, simTimer: null, countdown: null,
     // herkes
     lobby: null, view: null, chat: [], wasMyTurn: false, tab: null, unread: 0,
     reconnecting: false, retryTimer: null,
@@ -142,6 +142,7 @@
         const here = s && (s.kind !== 'remote' || s.connected) && !inGame(i);
         if (here) sim.ensure(i, s.kind === 'bot'); else sim.remove(i);
       });
+      sim.countdown = S.countdown ? Math.max(0, Math.ceil((S.countdown - Date.now()) / 1000)) : -1;
       sim.step(1 / 30);
       if (++n % 2) return;
       const snap = sim.snapshot();
@@ -347,7 +348,7 @@
   function hostSync() {
     if (!S.joined) return;
     const room = seatMeta();
-    const lobby = { code: S.code, mode: S.mode, seats: room, playing: !!S.game, playingMode: S.game ? S.mode : null };
+    const lobby = { code: S.code, mode: S.mode, seats: room, playing: !!S.game, playingMode: S.game ? S.mode : null, countdown: !!S.countdown };
     S.seats.forEach((s, i) => {
       if (!s || s.kind === 'bot') return;
       const e = inGame(i) ? S.order.indexOf(i) : -1;
@@ -454,13 +455,33 @@
     hostSync();
   }
 
+  // Başlat: herkes sehpanın başına toplanır, 3-2-1 sonra oyun açılır
   function hostStart() {
-    if (S.game) return;
+    if (S.game || S.countdown) return;
+    if (!startCheck()) return;
+    S.countdown = Date.now() + 3000;
+    if (S.sim) S.sim.gather(S.seats.map((s, i) => (s ? i : -1)).filter(i => i >= 0));
+    hostSync();
+    setTimeout(() => {
+      S.countdown = null;
+      if (S.sim) S.sim.ungather();
+      if (!S.game && startCheck()) hostBegin(); else hostSync();
+    }, 3700);
+  }
+
+  function startCheck() {
+    const m = MODES[S.mode];
+    const filled = S.seats.filter(Boolean).length;
+    if (filled < m.min || filled > m.max) {
+      toast(`${m.title} için ${m.min === m.max ? m.min : `${m.min}-${m.max}`} oyuncu gerekli. Boş yerlere bot ekleyebilirsin.`);
+      return false;
+    }
+    return true;
+  }
+
+  function hostBegin() {
     const m = MODES[S.mode];
     const filled = S.seats.map((s, i) => (s ? i : -1)).filter(i => i >= 0);
-    if (filled.length < m.min || filled.length > m.max) {
-      return toast(`${m.title} için ${m.min === m.max ? m.min : `${m.min}-${m.max}`} oyuncu gerekli. Boş yerlere bot ekleyebilirsin.`);
-    }
     S.order = filled;
     S.gameSeq++;
     S.game = new m.Engine(filled.map(i => S.seats[i].name));
@@ -626,7 +647,9 @@
     const okCount = filled >= m.min && filled <= m.max;
     const need = m.min === m.max ? `${m.min} oyuncu` : `${m.min}-${m.max} oyuncu`;
     let bottom, hud;
-    if (L.playing) {
+    if (L.countdown) {
+      bottom = hud = '<div class="hud-msg">🎲 Herkes masaya! Oyun başlıyor…</div>';
+    } else if (L.playing) {
       bottom = hud = `<div class="hud-msg">Şu an <b>${MODES[L.playingMode].title}</b> oynanıyor. Kurucu lobiye dönünce sen de katılırsın.</div>`;
     } else if (host) {
       bottom = `<button class="btn primary big" data-act="start" ${okCount ? '' : 'disabled'}>${okCount ? `▶ ${m.title} Başlat` : `${m.title} için ${need} gerekli (${filled} var)`}</button>`;
@@ -866,7 +889,7 @@
 
   // ================= Başlangıç =================
   // GitHub Pages sayfayı önbellekte tutabilir: daha yeni sürüm varsa bir kez yenile
-  const APP_VERSION = 5;
+  const APP_VERSION = 6;
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(({ v }) => {
     const key = 'okey101-reloaded-' + v;
     if (v > APP_VERSION && !sstore.get(key)) {
