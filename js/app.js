@@ -1,33 +1,57 @@
-/* Okey 101 — online oda (PeerJS) + arayüz */
+/* Oda sistemi (PeerJS): kalıcı lobi, oyun seçimi, sohbet, sesli sohbet, tema, yeniden bağlanma.
+   Oyunu kurucunun tarayıcısı yönetir; oyunlar window.GameModes içinde ayrı modüllerdir. */
 (function () {
   'use strict';
-  const R = window.OkeyRules;
-  const { Game, GameError } = window.OkeyEngine;
+  const MODES = window.GameModes;
+  const Voice = window.Voice;
 
   const PREFIX = 'ys-okey101-';
   const PEER_OPTS = { debug: 1 };
-  const COLS = 16, RACK_SIZE = 32;
+  const MODE_ORDER = ['okey', 'yedili', 'blackjack'];
+  const MODE_ICONS = { okey: '<span class="gi gi-okey">101</span>', yedili: '<span class="gi gi-card">7♥</span>', blackjack: '<span class="gi gi-bj">21</span>' };
   const BOT_NAMES = ['Bot Ali', 'Bot Ayşe', 'Bot Mehmet', 'Bot Zeynep', 'Bot Can', 'Bot Elif'];
+  const HOST_SAVE = 'okey101-host', ALIVE_KEY = 'okey101-alive', SESSION = 'okey101-session', NAME_KEY = 'okey101-name';
+  const TABLES = [
+    ['okyanus', 'Okyanus'], ['gece', 'Gece Mavisi'], ['mor', 'Mor'], ['gunbatimi', 'Gün Batımı'],
+    ['bordo', 'Bordo'], ['yesil', 'Klasik Yeşil'],
+  ];
+  const RACKS = [
+    ['ahsap', 'Ahşap'], ['beyaz', 'Beyaz'], ['siyah', 'Siyah'], ['kirmizi', 'Kırmızı'], ['mavi', 'Mavi'], ['pembe', 'Pembe'],
+  ];
 
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const store = {
-    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch { /* yok say */ } },
-  };
+  const mkStore = (getS) => ({
+    get(k) { try { return getS().getItem(k); } catch { return null; } },
+    set(k, v) { try { getS().setItem(k, v); } catch { /* yok say */ } },
+    del(k) { try { getS().removeItem(k); } catch { /* yok say */ } },
+  });
+  const store = mkStore(() => localStorage), sstore = mkStore(() => sessionStorage);
+  const readJSON = (st, k) => { try { return JSON.parse(st.get(k) || 'null'); } catch { return null; } };
 
   const S = {
-    role: null, name: '', code: '', seat: null,
-    peer: null, conn: null, joined: false,
-    seats: [null, null, null, null], game: null, botTimer: null,
-    lobby: null, view: null,
-    rack: new Array(RACK_SIZE).fill(null), selected: new Set(), rackRound: 0,
-    chat: [], modalHidden: false, wasMyTurn: false,
+    role: null, name: '', code: '', seat: null, joined: false,
+    peer: null, conn: null,
+    // kurucu
+    seats: [null, null, null, null], mode: 'okey', game: null, order: null, gameSeq: 0,
+    botTimer: null, dropTimers: {}, retry: 0,
+    // herkes
+    lobby: null, view: null, chat: [], wasMyTurn: false,
+    reconnecting: false, retryTimer: null,
+  };
+
+  const api = {
+    send: sendAction, toast, esc,
+    isHost: () => S.role === 'host',
+    view: () => S.view,
+    rerender: () => renderMode(),
   };
 
   // ================= Ortak =================
   function show(id) {
     document.querySelectorAll('.screen').forEach(el => el.classList.toggle('active', el.id === id));
+    if (id !== 'game') $('#modal').classList.add('hidden');
+    renderRoom();
   }
 
   let toastTimer;
@@ -63,7 +87,33 @@
     else send(S.conn, { t: 'chat', text });
   }
 
-  // ================= Oda kurucusu (host) =================
+  function voiceNotify(on, muted) {
+    if (S.role === 'host') {
+      if (S.seats[0]) Object.assign(S.seats[0], { voice: on, muted });
+      hostSync();
+    } else send(S.conn, { t: 'voice', on, muted });
+  }
+
+  // Sesli sohbet varsayılan olarak açık; kullanıcı kapatırsa hatırlanır
+  function autoVoice() {
+    if (store.get('okey101-voice') === '0' || Voice.on) return;
+    Voice.join().catch(e => toast('Mikrofon açılamadı: ' + (e.message || e.name) + ' — Sesli sohbet panelinden tekrar deneyebilirsin.'));
+  }
+
+  // ================= Tema =================
+  function applyTheme() {
+    document.body.dataset.table = store.get('okey101-table') || 'okyanus';
+    document.body.dataset.rack = store.get('okey101-rack') || 'ahsap';
+  }
+
+  function themeHTML() {
+    const t = document.body.dataset.table, r = document.body.dataset.rack;
+    return `<h3>🎨 Görünüm</h3>
+      <div class="theme-row"><small>Masa</small><div class="swatches">${TABLES.map(([k, n]) => `<button class="sw sw-table-${k} ${k === t ? 'sel' : ''}" data-act="setTable" data-k="${k}" title="${n}"></button>`).join('')}</div></div>
+      <div class="theme-row"><small>Istaka</small><div class="swatches">${RACKS.map(([k, n]) => `<button class="sw sw-rack-${k} ${k === r ? 'sel' : ''}" data-act="setRack" data-k="${k}" title="${n}"></button>`).join('')}</div></div>`;
+  }
+
+  // ================= Kurucu (host) =================
   function genCode() {
     const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let s = '';
@@ -71,28 +121,80 @@
     return s;
   }
 
-  function hostCreate() {
+  function hostCreate(restore) {
     S.role = 'host';
-    S.code = genCode();
     S.seat = 0;
-    $('#menuMsg').textContent = 'Oda kuruluyor…';
+    if (!restore) S.code = genCode();
+    $('#menuMsg').textContent = restore ? 'Oda geri yükleniyor…' : 'Oda kuruluyor…';
     const peer = new Peer(PREFIX + S.code, PEER_OPTS);
     S.peer = peer;
+    Voice.attach(peer, voiceNotify);
     peer.on('open', () => {
-      S.seats = [{ name: S.name, kind: 'host', connected: true }, null, null, null];
+      S.retry = 0;
+      S.joined = true;
+      if (!restore) S.seats = [{ name: S.name, kind: 'host', connected: true }, null, null, null];
+      else Object.assign(S.seats[0], { kind: 'host', connected: true, voice: false, muted: false });
+      sstore.set(SESSION, JSON.stringify({ code: S.code, role: 'host', name: S.name }));
       history.replaceState(null, '', '?oda=' + S.code);
       $('#menuMsg').textContent = '';
-      show('lobby');
+      $('#overlay').classList.add('hidden');
+      if (restore) pushChat({ name: null, text: 'Oda geri yüklendi. Diğer oyuncular otomatik yeniden bağlanıyor…' });
+      // Bu sekme odayı yönetiyor: aynı tarayıcıdaki diğer sekmeler kurucu gibi davranmasın
+      clearInterval(S.aliveTimer);
+      const alive = () => store.set(ALIVE_KEY, JSON.stringify({ code: S.code, t: Date.now() }));
+      alive();
+      S.aliveTimer = setInterval(alive, 2000);
       hostSync();
+      scheduleBots();
+      autoVoice();
     });
     peer.on('connection', hostAccept);
-    peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
-    peer.on('error', (err) => {
-      if (err.type === 'unavailable-id' && !S.seats[0]) { peer.destroy(); hostCreate(); return; }
-      if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') toast('Sunucu bağlantısı sorunlu, tekrar deneniyor…');
-      else if (err.type !== 'peer-unavailable') toast('Bağlantı hatası: ' + err.type);
-      if (!S.seats[0]) $('#menuMsg').textContent = 'Oda kurulamadı: ' + err.type;
+    peer.on('disconnected', () => {
+      setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1000);
     });
+    peer.on('error', (err) => {
+      if (err.type === 'unavailable-id') {
+        peer.destroy();
+        if (!restore) return hostCreate(false);
+        // Eski bağlantı sunucuda henüz düşmedi: aynı kodu tekrar dene
+        if (S.retry++ < 45) {
+          $('#menuMsg').textContent = `Oda geri yükleniyor… (${S.retry})`;
+          setTimeout(() => hostCreate(true), 2000);
+        } else $('#menuMsg').textContent = 'Oda geri yüklenemedi. Yeni oda kurabilirsin.';
+        return;
+      }
+      if (err.type === 'peer-unavailable') return;
+      if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') toast('Sunucu bağlantısı sorunlu, tekrar deneniyor…');
+      else toast('Bağlantı hatası: ' + err.type);
+      if (!S.joined) $('#menuMsg').textContent = 'Oda kurulamadı: ' + err.type;
+    });
+  }
+
+  function hostRestore(saved) {
+    S.name = saved.name;
+    S.code = saved.code;
+    S.mode = MODES[saved.mode] ? saved.mode : 'okey';
+    S.seats = saved.seats.map(s => s && { name: s.name, kind: s.kind, connected: s.kind !== 'remote', conn: null });
+    S.order = saved.order || null;
+    S.gameSeq = saved.gameSeq || 1;
+    S.chat = saved.chat || [];
+    if (saved.game && S.order) {
+      S.game = Object.assign(Object.create(MODES[S.mode].Engine.prototype), saved.game);
+    }
+    S.seats.forEach((s, i) => { if (s && s.kind === 'remote') scheduleLobbyDrop(i); });
+    show('menu');
+    hostCreate(true);
+  }
+
+  function hostSave() {
+    if (S.role !== 'host' || !S.code || !S.joined) return;
+    try {
+      store.set(HOST_SAVE, JSON.stringify({
+        code: S.code, name: S.name, mode: S.mode, at: Date.now(), gameSeq: S.gameSeq,
+        seats: S.seats.map(s => s && { name: s.name, kind: s.kind }),
+        order: S.order, game: S.game, chat: S.chat.slice(-40),
+      }));
+    } catch (e) { console.warn('kaydedilemedi', e); }
   }
 
   function hostAccept(conn) {
@@ -101,40 +203,43 @@
     conn.on('error', () => hostOnClose(conn));
   }
 
-  function seatOfConn(conn) {
-    return S.seats.findIndex(s => s && s.conn === conn);
-  }
+  const seatOfConn = (conn) => S.seats.findIndex(s => s && s.conn === conn);
+  const inGame = (i) => !!(S.game && S.order && S.order.includes(i));
 
   function hostOnMsg(conn, msg) {
     if (!msg || typeof msg !== 'object') return;
     if (msg.t === 'join') return hostJoin(conn, cleanText(msg.name, 16) || 'Oyuncu');
     const seat = seatOfConn(conn);
     if (seat < 0) return;
+    const s = S.seats[seat];
     if (msg.t === 'act') hostAction(seat, msg.action);
     else if (msg.t === 'chat') {
       const text = cleanText(msg.text, 200);
-      if (text) pushChat({ name: S.seats[seat].name, text });
+      if (text) pushChat({ name: s.name, text });
+    } else if (msg.t === 'voice') {
+      s.voice = !!msg.on;
+      s.muted = !!msg.muted;
+      hostSync();
     }
   }
 
   function hostJoin(conn, name) {
-    let seat;
-    if (S.game) {
-      // Oyun başladıysa sadece aynı isimle kopan oyuncu geri dönebilir
-      seat = S.seats.findIndex(s => s && s.kind === 'remote' && s.name === name);
-      if (seat < 0) return send(conn, { t: 'reject', msg: 'Oyun başlamış. Sadece kopan oyuncular aynı isimle geri girebilir.' });
-      const old = S.seats[seat].conn;
-      if (old && old !== conn) { S.seats[seat].conn = null; try { old.close(); } catch { /* yok say */ } }
-      Object.assign(S.seats[seat], { conn, connected: true });
+    // Aynı isimli oyuncu geri dönüyorsa koltuğunu geri ver
+    let seat = S.seats.findIndex(s => s && s.kind === 'remote' && s.name === name);
+    if (seat >= 0) {
+      const s = S.seats[seat];
+      if (s.conn && s.conn !== conn) { const old = s.conn; s.conn = null; try { old.close(); } catch { /* yok say */ } }
+      Object.assign(s, { conn, peerId: conn.peer, connected: true, voice: false, muted: false });
+      clearTimeout(S.dropTimers[seat]);
       pushChat({ name: null, text: `${name} geri döndü.` });
     } else {
       let n = name, k = 2;
-      while (S.seats.some(s => s && s.name === n)) n = `${name} ${k++}`;
+      while (S.seats.some(x => x && x.name === n)) n = `${name} ${k++}`;
       name = n;
-      seat = S.seats.findIndex(s => !s);
-      if (seat < 0) return send(conn, { t: 'reject', msg: 'Oda dolu.' });
-      S.seats[seat] = { name, kind: 'remote', conn, connected: true };
-      pushChat({ name: null, text: `${name} odaya katıldı.` });
+      seat = S.seats.findIndex(x => !x);
+      if (seat < 0) return send(conn, { t: 'reject', msg: 'Oda dolu (4 kişi).' });
+      S.seats[seat] = { name, kind: 'remote', conn, peerId: conn.peer, connected: true };
+      pushChat({ name: null, text: `${name} odaya katıldı.` + (S.game ? ' Oyun bitince katılabilir.' : '') });
     }
     send(conn, { t: 'welcome', seat, name, code: S.code });
     send(conn, { t: 'chatAll', list: S.chat.slice(-50) });
@@ -146,50 +251,72 @@
     const seat = seatOfConn(conn);
     if (seat < 0) return;
     const s = S.seats[seat];
-    if (!S.game) {
-      S.seats[seat] = null;
-      pushChat({ name: null, text: `${s.name} odadan ayrıldı.` });
-    } else {
-      s.connected = false;
-      s.conn = null;
-      pushChat({ name: null, text: `${s.name} koptu, yerine bot oynuyor. Aynı isimle geri girebilir.` });
+    Object.assign(s, { connected: false, conn: null, voice: false, muted: false });
+    if (inGame(seat)) pushChat({ name: null, text: `${s.name} koptu, yerine bot oynuyor. Aynı isimle geri girebilir.` });
+    else {
+      pushChat({ name: null, text: `${s.name} koptu.` });
+      scheduleLobbyDrop(seat);
     }
     hostSync();
     scheduleBots();
   }
 
-  function seatMeta() {
-    return S.seats.map(s => s && { name: s.name, kind: s.kind, connected: s.connected });
+  // Lobide kopan oyuncunun koltuğu bir süre beklenir, dönmezse boşaltılır
+  function scheduleLobbyDrop(i) {
+    clearTimeout(S.dropTimers[i]);
+    S.dropTimers[i] = setTimeout(() => {
+      const s = S.seats[i];
+      if (s && s.kind === 'remote' && !s.connected && !inGame(i)) {
+        S.seats[i] = null;
+        pushChat({ name: null, text: `${s.name} odadan ayrıldı.` });
+        hostSync();
+      }
+    }, 60000);
   }
 
-  function hostSync() {
-    if (!S.game) {
-      S.lobby = { code: S.code, seats: seatMeta() };
-      renderLobby();
-      for (const s of S.seats) if (s && s.kind === 'remote' && s.connected) send(s.conn, { t: 'lobby', lobby: S.lobby });
-      return;
-    }
-    const meta = seatMeta();
-    S.seats.forEach((s, i) => {
-      if (!s) return;
-      const view = S.game.viewFor(i);
-      view.seats = meta;
-      if (s.kind === 'host') onView(view);
-      else if (s.kind === 'remote' && s.connected) send(s.conn, { t: 'state', view });
+  function seatMeta() {
+    return S.seats.map(s => s && {
+      name: s.name, kind: s.kind, connected: !!s.connected,
+      peerId: s.kind === 'host' ? (S.peer && S.peer.id) : s.peerId,
+      voice: !!s.voice, muted: !!s.muted,
     });
   }
 
+  function hostSync() {
+    if (!S.joined) return;
+    const room = seatMeta();
+    const lobby = { code: S.code, mode: S.mode, seats: room, playing: !!S.game, playingMode: S.game ? S.mode : null };
+    S.seats.forEach((s, i) => {
+      if (!s || s.kind === 'bot') return;
+      const e = inGame(i) ? S.order.indexOf(i) : -1;
+      let msg;
+      if (e >= 0) {
+        const view = S.game.viewFor(e);
+        view.mode = S.mode;
+        view.gameId = S.gameSeq;
+        view.seats = S.order.map(r => room[r]);
+        view.actors = S.game.actorSeats();
+        msg = { t: 'state', view, lobby };
+      } else msg = { t: 'lobby', lobby };
+      if (s.kind === 'host') onMsg(msg);
+      else if (s.connected) send(s.conn, msg);
+    });
+    hostSave();
+  }
+
   function hostAction(seat, action) {
+    if (!action || typeof action !== 'object') return;
     const g = S.game;
-    if (!g) return;
-    if (action && action.type === 'nextRound') {
-      if (seat === 0 && g.status === 'roundEnd') { g.startRound(); hostSync(); scheduleBots(); }
+    if (action.type === 'nextRound') {
+      if (seat === 0 && g && g.status === 'roundEnd') { g.startRound(); hostSync(); scheduleBots(); }
       return;
     }
+    if (action.type === 'toLobby') { if (seat === 0) hostToLobby(); return; }
+    if (!g || !inGame(seat)) return;
     try {
-      g.apply(seat, action);
+      g.apply(S.order.indexOf(seat), action);
     } catch (e) {
-      if (!(e instanceof GameError)) console.error(e);
+      if (!(e instanceof MODES[S.mode].GameError)) console.error(e);
       if (seat === 0) toast(e.message);
       else send(S.seats[seat].conn, { t: 'error', msg: e.message });
       return;
@@ -198,27 +325,48 @@
     scheduleBots();
   }
 
-  function isBotSeat(i) {
-    const s = S.seats[i];
-    return s && (s.kind === 'bot' || (s.kind === 'remote' && !s.connected));
+  function botSeats() {
+    const set = new Set();
+    if (!S.order) return set;
+    S.order.forEach((r, e) => {
+      const s = S.seats[r];
+      if (s && (s.kind === 'bot' || (s.kind === 'remote' && !s.connected))) set.add(e);
+    });
+    return set;
   }
 
   function scheduleBots() {
     clearTimeout(S.botTimer);
     const g = S.game;
-    if (!g || g.status !== 'playing' || !isBotSeat(g.turn)) return;
-    const delay = S.seats[g.turn].kind === 'bot' ? 1100 : 3000;
-    S.botTimer = setTimeout(() => {
-      if (g.status === 'playing' && isBotSeat(g.turn)) {
-        try { g.botTurn(g.turn); } catch (e) { console.error(e); }
+    if (!g || g.status !== 'playing') return;
+    const bots = botSeats();
+    const actor = g.actorSeats().find(e => bots.has(e));
+    if (actor !== undefined) {
+      const real = S.seats[S.order[actor]].kind === 'bot';
+      S.botTimer = setTimeout(() => {
+        if (g === S.game && g.status === 'playing' && g.actorSeats().includes(actor) && botSeats().has(actor)) {
+          try { g.botTurn(actor); } catch (e) { console.error(e); }
+        }
+        hostSync();
+        scheduleBots();
+      }, real ? 1100 : 3000);
+      return;
+    }
+    if (g.botReact) {
+      const r = g.botReact(bots);
+      if (r) {
+        S.botTimer = setTimeout(() => {
+          if (g !== S.game) return;
+          try { g.apply(r.seat, r.action); } catch { /* fırsat geçti */ }
+          hostSync();
+          scheduleBots();
+        }, 2500);
       }
-      hostSync();
-      scheduleBots();
-    }, delay);
+    }
   }
 
   function hostAddBot(i) {
-    if (S.game || S.seats[i]) return;
+    if (S.seats[i] || S.game) return;
     const used = new Set(S.seats.filter(Boolean).map(s => s.name));
     const name = BOT_NAMES.find(n => !used.has(n)) || 'Bot ' + (i + 1);
     S.seats[i] = { name, kind: 'bot', connected: true };
@@ -227,27 +375,55 @@
 
   function hostKick(i) {
     const s = S.seats[i];
-    if (S.game || !s || s.kind === 'host') return;
-    if (s.kind === 'remote') { send(s.conn, { t: 'reject', msg: 'Kurucu seni odadan çıkardı.' }); setTimeout(() => { try { s.conn.close(); } catch { /* yok say */ } }, 300); }
+    if (!s || s.kind === 'host' || inGame(i)) return;
+    if (s.kind === 'remote' && s.conn) {
+      const c = s.conn;
+      s.conn = null;
+      send(c, { t: 'reject', msg: 'Kurucu seni odadan çıkardı.' });
+      setTimeout(() => { try { c.close(); } catch { /* yok say */ } }, 300);
+    }
     S.seats[i] = null;
+    hostSync();
+  }
+
+  function hostSetMode(k) {
+    if (S.game || !MODES[k]) return;
+    S.mode = k;
     hostSync();
   }
 
   function hostStart() {
     if (S.game) return;
-    if (!S.seats.every(Boolean)) return toast('4 oyuncu gerekli. Boş yerlere bot ekleyebilirsin.');
-    S.game = new Game(S.seats.map(s => s.name));
+    const m = MODES[S.mode];
+    const filled = S.seats.map((s, i) => (s ? i : -1)).filter(i => i >= 0);
+    if (filled.length < m.min || filled.length > m.max) {
+      return toast(`${m.title} için ${m.min === m.max ? m.min : `${m.min}-${m.max}`} oyuncu gerekli. Boş yerlere bot ekleyebilirsin.`);
+    }
+    S.order = filled;
+    S.gameSeq++;
+    S.game = new m.Engine(filled.map(i => S.seats[i].name));
     S.game.startRound();
-    pushChat({ name: null, text: 'Oyun başladı. Bol şans!' });
+    pushChat({ name: null, text: `${m.title} başladı. Bol şans!` });
     hostSync();
     scheduleBots();
+  }
+
+  function hostToLobby() {
+    clearTimeout(S.botTimer);
+    S.game = null;
+    S.order = null;
+    S.seats.forEach((s, i) => { if (s && s.kind === 'remote' && !s.connected) scheduleLobbyDrop(i); });
+    pushChat({ name: null, text: 'Lobiye dönüldü. Kurucu yeni oyun seçebilir.' });
+    hostSync();
   }
 
   function pushChat(m) {
     S.chat.push(m);
     if (S.chat.length > 100) S.chat.shift();
     renderChat();
-    if (S.role === 'host') for (const s of S.seats) if (s && s.kind === 'remote' && s.connected) send(s.conn, { t: 'chat', m });
+    if (S.role === 'host') {
+      for (const s of S.seats) if (s && s.kind === 'remote' && s.connected) send(s.conn, { t: 'chat', m });
+    }
   }
 
   // ================= Katılan oyuncu (client) =================
@@ -256,63 +432,101 @@
     S.role = 'client';
     S.code = code;
     S.joined = false;
+    if (Voice.on) Voice.leave(true);
     if (S.peer) { try { S.peer.destroy(); } catch { /* yok say */ } }
-    $('#menuMsg').textContent = 'Bağlanılıyor…';
+    if (!S.reconnecting) $('#menuMsg').textContent = 'Bağlanılıyor…';
     const peer = new Peer(PEER_OPTS);
     S.peer = peer;
+    Voice.attach(peer, voiceNotify);
     clearTimeout(joinTimer);
-    joinTimer = setTimeout(() => {
-      if (!S.joined) { $('#menuMsg').textContent = 'Bağlanamadı. Oda kodunu kontrol edip tekrar dene.'; hideOverlay(); }
-    }, 15000);
+    joinTimer = setTimeout(() => { if (!S.joined) failJoin('Bağlanamadı. Oda kodunu kontrol edip tekrar dene.'); }, 15000);
     peer.on('open', () => {
       const conn = peer.connect(PREFIX + code, { reliable: true });
       S.conn = conn;
       conn.on('open', () => send(conn, { t: 'join', name: S.name }));
-      conn.on('data', clientOnMsg);
-      conn.on('close', () => { if (S.conn === conn && S.joined) onLost(); });
+      conn.on('data', onMsg);
+      conn.on('close', () => { if (S.conn === conn) onLost(); });
     });
     peer.on('error', (err) => {
-      if (err.type === 'peer-unavailable') {
-        $('#menuMsg').textContent = 'Oda bulunamadı. Kod yanlış olabilir ya da kurucu çıkmış.';
-        if (S.joined) onLost(); else show('menu');
-      } else if (!S.joined) $('#menuMsg').textContent = 'Bağlantı hatası: ' + err.type;
-      else toast('Bağlantı hatası: ' + err.type);
+      if (S.joined) { if (err.type !== 'peer-unavailable') toast('Bağlantı hatası: ' + err.type); return; }
+      failJoin(err.type === 'peer-unavailable' ? 'Oda bulunamadı. Kod yanlış olabilir ya da kurucu odayı kapatmış.' : 'Bağlantı hatası: ' + err.type);
     });
   }
 
-  function clientOnMsg(msg) {
+  function failJoin(msg) {
+    clearTimeout(joinTimer);
+    if (S.reconnecting) return scheduleReconnect();
+    $('#menuMsg').textContent = msg;
+    show('menu');
+  }
+
+  function onLost() {
+    if (!S.joined || S.role !== 'client') return;
+    S.joined = false;
+    S.reconnecting = true;
+    S.retry = 0;
+    showOverlay('Bağlantı koptu', 'Yeniden bağlanılıyor…', '<button class="btn ghost" data-act="leave">Ana Menü</button>');
+    scheduleReconnect();
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(S.retryTimer);
+    if (S.retry++ >= 60) {
+      S.reconnecting = false;
+      showOverlay('Bağlanılamadı', 'Kurucu odayı kapatmış olabilir.', '<button class="btn primary" data-act="reconnect">Tekrar Dene</button><button class="btn ghost" data-act="leave">Ana Menü</button>');
+      return;
+    }
+    const m = $('#overlayMsg');
+    if (m) m.textContent = `Yeniden bağlanılıyor… (${S.retry})`;
+    S.retryTimer = setTimeout(() => clientJoin(S.code), S.retry === 1 ? 500 : 3000);
+  }
+
+  function showOverlay(title, msg, buttons) {
+    $('#overlayCard').innerHTML = `<h2>${title}</h2><p id="overlayMsg">${msg}</p><div class="row">${buttons}</div>`;
+    $('#overlay').classList.remove('hidden');
+  }
+
+  // Kurucudan gelen (kurucu için yerel) mesajlar
+  function onMsg(msg) {
     if (!msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case 'welcome':
+        clearTimeout(joinTimer);
         S.joined = true;
+        S.reconnecting = false;
         S.seat = msg.seat;
         S.name = msg.name;
-        clearTimeout(joinTimer);
+        sstore.set(SESSION, JSON.stringify({ code: S.code, role: 'client', name: S.name }));
         history.replaceState(null, '', '?oda=' + S.code);
         $('#menuMsg').textContent = '';
-        hideOverlay();
+        $('#overlay').classList.add('hidden');
+        autoVoice();
         break;
       case 'reject':
         toast(msg.msg);
         $('#menuMsg').textContent = msg.msg;
         S.joined = false;
+        S.reconnecting = false;
+        sstore.del(SESSION);
         try { S.peer.destroy(); } catch { /* yok say */ }
+        $('#overlay').classList.add('hidden');
         show('menu');
-        hideOverlay();
         break;
       case 'lobby':
         S.lobby = msg.lobby;
+        S.view = null;
+        S.wasMyTurn = false;
+        document.title = 'Oyun Odası';
+        Voice.setRoom(msg.lobby.seats);
         renderLobby();
         break;
       case 'state':
+        S.lobby = msg.lobby;
+        Voice.setRoom(msg.lobby.seats);
         onView(msg.view);
         break;
-      case 'error':
-        toast(msg.msg);
-        break;
-      case 'chat':
-        pushChat(msg.m);
-        break;
+      case 'error': toast(msg.msg); break;
+      case 'chat': pushChat(msg.m); break;
       case 'chatAll':
         S.chat = Array.isArray(msg.list) ? msg.list : [];
         renderChat();
@@ -320,368 +534,108 @@
     }
   }
 
-  function onLost() {
-    S.joined = false;
-    $('#overlayCard').innerHTML = `<h2>Bağlantı koptu</h2>
-      <p>Kurucuyla bağlantı kesildi. Kurucu sayfayı kapattıysa oda kapanmıştır.</p>
-      <div class="row"><button class="btn primary" data-act="reconnect">Yeniden Bağlan</button>
-      <button class="btn" data-act="leave">Ana Menü</button></div>`;
-    $('#overlay').classList.remove('hidden');
-  }
-
-  function hideOverlay() { $('#overlay').classList.add('hidden'); }
-
   // ================= Lobi =================
   function renderLobby() {
     const L = S.lobby;
     if (!L) return;
     show('lobby');
     const host = S.role === 'host';
-    const full = L.seats.every(Boolean);
+    const m = MODES[L.mode];
+    const filled = L.seats.filter(Boolean).length;
+    const games = MODE_ORDER.map(k => {
+      const g = MODES[k];
+      const can = host && !L.playing;
+      return `<button class="game-pick ${k === L.mode ? 'sel' : ''}" ${can ? `data-act="setMode" data-k="${k}"` : 'disabled'}>
+        ${MODE_ICONS[k]}<b>${g.title}</b><small>${g.desc}</small></button>`;
+    }).join('');
     const seats = L.seats.map((s, i) => {
-      if (!s) {
-        return `<li class="seat empty"><span>${i + 1}. Boş koltuk</span>${host ? `<button class="btn sm" data-act="addBot" data-i="${i}">+ Bot Ekle</button>` : ''}</li>`;
-      }
+      if (!s) return `<li class="seat empty"><span>${i + 1}. Boş koltuk</span>${host && !L.playing ? `<button class="btn sm" data-act="addBot" data-i="${i}">+ Bot Ekle</button>` : ''}</li>`;
       const tag = s.kind === 'host' ? '<span class="badge gold">Kurucu</span>' : s.kind === 'bot' ? '<span class="badge">Bot</span>' : '';
       const me = i === S.seat ? ' <span class="badge me">Sen</span>' : '';
-      const kick = host && s.kind !== 'host' ? `<button class="btn sm ghost" data-act="kick" data-i="${i}">Çıkar</button>` : '';
-      return `<li class="seat"><span>${i + 1}. ${esc(s.name)} ${tag}${me}</span>${kick}</li>`;
+      const off = s.kind === 'remote' && !s.connected ? ' <span class="badge warn">Koptu</span>' : '';
+      const mic = s.voice ? ` <span class="badge">${s.muted ? '🔇' : '🎤'}</span>` : '';
+      const kick = host && s.kind !== 'host' && !L.playing ? `<button class="btn sm ghost" data-act="kick" data-i="${i}">Çıkar</button>` : '';
+      return `<li class="seat"><span>${i + 1}. ${esc(s.name)} ${tag}${me}${off}${mic}</span>${kick}</li>`;
     }).join('');
+    const okCount = filled >= m.min && filled <= m.max;
+    const need = m.min === m.max ? `${m.min} oyuncu` : `${m.min}-${m.max} oyuncu`;
+    let bottom;
+    if (L.playing) bottom = `<p class="waiting">Şu an <b>${MODES[L.playingMode].title}</b> oynanıyor. Kurucu lobiye dönünce sen de katılabilirsin.</p>`;
+    else if (host) bottom = `<button class="btn primary big" data-act="start" ${okCount ? '' : 'disabled'}>${okCount ? `${m.title} Başlat` : `${m.title} için ${need} gerekli (${filled} var)`}</button>`;
+    else bottom = `<p class="waiting">Kurucunun <b>${m.title}</b> oyununu başlatması bekleniyor… (${filled} kişi)</p>`;
+
     $('#lobbyCard').innerHTML = `
-      <h2>Oda Kodu</h2>
-      <div class="room-code">${esc(L.code)}</div>
-      <div class="share"><input readonly value="${esc(shareLink())}"><button class="btn sm" data-act="copyLink">Linki Kopyala</button></div>
-      <p class="muted">Linki arkadaşlarına gönder ya da oda kodunu söyle. Boş koltuklara bot ekleyebilirsin.</p>
+      <div class="lobby-head">
+        <div><small class="muted">Oda Kodu</small><div class="room-code">${esc(L.code)}</div></div>
+        <button class="btn sm" data-act="copyLink">Davet Linkini Kopyala</button>
+      </div>
+      <h3>Oyun Seç</h3>
+      <div class="game-picks">${games}</div>
+      ${host ? '' : '<p class="muted tiny">Oyunu kurucu seçer.</p>'}
+      <h3>Oyuncular</h3>
       <ul class="seats">${seats}</ul>
-      ${host
-        ? `<button class="btn primary big" data-act="start" ${full ? '' : 'disabled'}>${full ? 'Oyunu Başlat' : `Oyuncu bekleniyor (${L.seats.filter(Boolean).length}/4)`}</button>`
-        : `<p class="waiting">Kurucunun oyunu başlatması bekleniyor… (${L.seats.filter(Boolean).length}/4)</p>`}
-      <button class="btn ghost sm" data-act="leave">Odadan Çık</button>`;
-  }
-
-  // ================= Istaka (rack) =================
-  function sortKey(id) {
-    const t = R.tileInfo(id);
-    return t.fake ? 999 : t.c * 20 + t.n;
-  }
-
-  // Grupları aralarında boşlukla yerleştir, kalanları sona diz
-  function layout(groups, rest) {
-    const rack = new Array(RACK_SIZE).fill(null);
-    let row = 0, col = 0;
-    for (const g of groups) {
-      if (col + g.length > COLS) { row++; col = 0; }
-      if (row > 1 || g.length > COLS) return null;
-      g.forEach((id, k) => { rack[row * COLS + col + k] = id; });
-      col += g.length + 1;
-    }
-    let pos = row * COLS + col;
-    for (const id of rest) {
-      while (pos < RACK_SIZE && rack[pos] !== null) pos++;
-      if (pos >= RACK_SIZE) {
-        // sığmadı: boş kalan her yere dağıt
-        const empty = rack.map((x, i) => (x === null ? i : -1)).filter(i => i >= 0);
-        const left = rest.slice(rest.indexOf(id));
-        if (left.length > empty.length) return null;
-        left.forEach((x, k) => { rack[empty[k]] = x; });
-        return rack;
-      }
-      rack[pos++] = id;
-    }
-    return rack;
-  }
-
-  function applyLayout(groups, rest) {
-    rest = rest.slice().sort((a, b) => sortKey(a) - sortKey(b));
-    const r = layout(groups, rest) || layout([], groups.flat().concat(rest));
-    if (r) S.rack = r;
-    S.selected.clear();
-  }
-
-  function arrangeByColor(hand) {
-    const by = [[], [], [], [], []];
-    for (const id of hand) { const t = R.tileInfo(id); by[t.fake ? 4 : t.c].push(id); }
-    by.forEach(a => a.sort((x, y) => sortKey(x) - sortKey(y)));
-    const chunks = by.filter(a => a.length);
-    S.rack = layout(chunks, []) || layout([], hand.slice().sort((a, b) => sortKey(a) - sortKey(b)));
-  }
-
-  function arrangeSeries() {
-    const v = S.view;
-    const best = R.findBestGroups(v.hand, v.okey);
-    const used = new Set(best.groups.flat());
-    applyLayout(best.groups, v.hand.filter(id => !used.has(id)));
-    renderGame();
-  }
-
-  function arrangePairs() {
-    const v = S.view;
-    const pairs = R.findPairs(v.hand, v.okey);
-    const used = new Set(pairs.flat());
-    applyLayout(pairs, v.hand.filter(id => !used.has(id)));
-    renderGame();
-  }
-
-  function syncRack(v) {
-    if (v.round !== S.rackRound) {
-      S.rackRound = v.round;
-      S.selected.clear();
-      arrangeByColor(v.hand);
-      return;
-    }
-    const inHand = new Set(v.hand);
-    S.rack = S.rack.map(id => (id !== null && inHand.has(id) ? id : null));
-    for (const id of [...S.selected]) if (!inHand.has(id)) S.selected.delete(id);
-    const onRack = new Set(S.rack.filter(id => id !== null));
-    for (const id of v.hand) {
-      if (onRack.has(id)) continue;
-      let last = -1;
-      S.rack.forEach((x, i) => { if (x !== null) last = i; });
-      const pos = last + 2 < RACK_SIZE ? last + 2 : S.rack.indexOf(null);
-      S.rack[pos] = id;
-      onRack.add(id);
-    }
-  }
-
-  function moveToSlot(id, target) {
-    const rack = S.rack;
-    const from = rack.indexOf(id);
-    if (from < 0 || from === target) return;
-    rack[from] = null;
-    if (rack[target] === null) { rack[target] = id; return; }
-    const start = Math.floor(target / COLS) * COLS, end = start + COLS;
-    let e = -1;
-    for (let i = target + 1; i < end; i++) if (rack[i] === null) { e = i; break; }
-    if (e >= 0) {
-      for (let i = e; i > target; i--) rack[i] = rack[i - 1];
-      rack[target] = id;
-      return;
-    }
-    for (let i = target - 1; i >= start; i--) if (rack[i] === null) { e = i; break; }
-    if (e >= 0) {
-      for (let i = e; i < target; i++) rack[i] = rack[i + 1];
-      rack[target] = id;
-      return;
-    }
-    rack[from] = rack[target];
-    rack[target] = id;
-  }
-
-  // Istakadaki bitişik taş grupları
-  function rackSegments() {
-    const segs = [];
-    for (let row = 0; row < 2; row++) {
-      let cur = [];
-      for (let col = 0; col <= COLS; col++) {
-        const id = col < COLS ? S.rack[row * COLS + col] : null;
-        if (id !== null) cur.push(id);
-        else { if (cur.length) segs.push(cur); cur = []; }
-      }
-    }
-    return segs;
-  }
-
-  function rackPlan() {
-    const ok = S.view.okey;
-    const series = [], pairs = [];
-    let sum = 0;
-    for (const seg of rackSegments()) {
-      if (seg.length >= 3) {
-        const r = R.analyzeGroup(seg, ok);
-        if (r) { series.push(seg); sum += r.value; continue; }
-      }
-      if (seg.length % 2 === 0) {
-        const ps = [];
-        for (let i = 0; i < seg.length; i += 2) ps.push([seg[i], seg[i + 1]]);
-        if (ps.every(p => R.isPair(p, ok))) pairs.push(...ps);
-      }
-    }
-    return { series, sum, pairs };
+      ${bottom}
+      <button class="btn ghost sm" data-act="leave">${host ? 'Odayı Kapat' : 'Odadan Çık'}</button>`;
   }
 
   // ================= Oyun ekranı =================
   function onView(view) {
-    const firstState = !S.view;
-    const prevRound = S.view && S.view.round;
-    const prevStatus = S.view && S.view.status;
+    const prev = S.view;
     S.view = view;
-    S.seat = view.you;
-    syncRack(view);
-    if (view.round !== prevRound || (view.status === 'roundEnd' && prevStatus !== 'roundEnd')) S.modalHidden = false;
-    const myTurn = view.status === 'playing' && view.turn === view.you;
-    if (myTurn && !S.wasMyTurn && !firstState) beep();
+    const myTurn = view.status === 'playing' && (view.actors || []).includes(view.you);
+    if (myTurn && !S.wasMyTurn && prev) beep();
     S.wasMyTurn = myTurn;
-    document.title = (myTurn ? '🔔 Sıra sende! — ' : '') + 'Okey 101 Online';
+    document.title = (myTurn ? '🔔 Sıra sende! — ' : '') + MODES[view.mode].title;
     show('game');
-    renderGame();
+    renderMode();
   }
 
-  function tileHTML(id, opts = {}) {
-    const v = S.view;
-    const t = R.tileInfo(id);
-    const cls = ['tile'];
-    if (opts.sm) cls.push('sm');
-    if (opts.cls) cls.push(opts.cls);
-    if (t.fake) {
-      cls.push('fake');
-      return `<div class="${cls.join(' ')}" data-id="${id}" title="Sahte okey"><span class="num">★</span></div>`;
-    }
-    cls.push('c' + t.c);
-    if (v && R.isWild(id, v.okey)) cls.push('wild');
-    return `<div class="${cls.join(' ')}" data-id="${id}"><span class="num">${t.n}</span><span class="dot"></span></div>`;
-  }
-
-  function myTurnPhase(phase) {
-    const v = S.view;
-    return v.status === 'playing' && v.turn === v.you && (!phase || v.phase === phase);
-  }
-
-  function playerBox(i) {
-    const v = S.view;
-    const p = v.players[i];
-    const meta = v.seats && v.seats[i];
-    const prevOfMe = (v.you + 3) % 4 === i;
-    const top = p.discards[p.discards.length - 1];
-    const canTake = prevOfMe && myTurnPhase('draw') && top !== undefined;
-    const flags = [];
-    if (meta && meta.kind === 'bot') flags.push('<span class="badge">Bot</span>');
-    if (meta && meta.kind === 'remote' && !meta.connected) flags.push('<span class="badge warn">Koptu</span>');
-    if (i === v.dealer) flags.push('<span class="badge">Dağıtan</span>');
-    if (p.opened) flags.push(`<span class="badge ok">${p.openType === 'pairs' ? 'Çift açtı' : 'Açtı'}</span>`);
-    const discard = `<div class="pdiscard ${canTake ? 'takeable' : ''}" ${canTake ? 'data-act="takeDiscard" title="Bu taşı al"' : ''}>
-        ${top !== undefined ? tileHTML(top) : '<div class="tile empty"></div>'}
-        <small>${prevOfMe ? (canTake ? 'Al' : 'Soldan') : 'Attığı'} (${p.discards.length})</small>
-      </div>`;
-    return `<div class="pbox ${v.status === 'playing' && v.turn === i ? 'turn' : ''}">
-        <div class="pname">${esc(p.name)}</div>
-        <div class="pmeta">${p.count} taş · <b>${p.total}</b> puan</div>
-        <div class="flags">${flags.join('')}</div>
-      </div>${discard}`;
-  }
-
-  function renderGame() {
+  function renderMode() {
     const v = S.view;
     if (!v) return;
-    const me = v.players[v.you];
-    const pos = { right: (v.you + 1) % 4, top: (v.you + 2) % 4, left: (v.you + 3) % 4 };
-    $('#pTop').innerHTML = playerBox(pos.top);
-    $('#pLeft').innerHTML = playerBox(pos.left);
-    $('#pRight').innerHTML = playerBox(pos.right);
-
-    // Orta: deste, gösterge, okey
-    const canDraw = myTurnPhase('draw') && v.pileCount > 0;
-    $('#centerBar').innerHTML = `
-      <div class="pile ${canDraw ? 'active' : ''}" ${canDraw ? 'data-act="drawPile" title="Desteden çek"' : ''}>
-        <div class="tile back"></div><div class="tile back stack"></div>
-        <span>Deste: <b>${v.pileCount}</b></span>
-      </div>
-      <div class="ind"><small>Gösterge</small>${tileHTML(v.indicator)}</div>
-      <div class="ind"><small>Okey</small>${tileHTML(R.okeyTileId(v.okey), { cls: 'okeyshow' })}</div>
-      <div class="round-info"><b>${v.round}. El</b><br><small>Sıra: ${esc(v.players[v.turn].name)}</small></div>`;
-
-    // Masadaki perler
-    const canAdd = myTurnPhase('play') && me.opened;
-    const byOwner = [0, 1, 2, 3].map(o => v.table.filter(g => g.owner === o)).map((gs, o) => ({ o, gs })).filter(x => x.gs.length);
-    $('#tableGroups').innerHTML = byOwner.length ? byOwner.map(({ o, gs }) => `
-      <div class="tg-owner"><div class="tg-name">${esc(v.players[o].name)}</div>
-        <div class="tg-list">${gs.map(g => `<div class="tgroup ${canAdd && g.kind !== 'pair' ? 'droppable' : ''}" data-group="${g.id}" ${canAdd ? 'data-act="groupClick"' : ''}>${g.tiles.map(id => tileHTML(id, { sm: true })).join('')}</div>`).join('')}</div>
-      </div>`).join('') : '<div class="empty-table">Henüz kimse elini açmadı. Açmak için perlerin toplamı en az 101 olmalı ya da en az 5 çift.</div>';
-
-    // Benim bilgim + durum + butonlar
-    const myFlags = [];
-    if (v.you === v.dealer) myFlags.push('<span class="badge">Dağıtan</span>');
-    if (me.opened) myFlags.push(`<span class="badge ok">${me.openType === 'pairs' ? 'Çift açtın' : 'Açtın'}</span>`);
-    if (me.penalty) myFlags.push(`<span class="badge warn">Ceza +${me.penalty}</span>`);
-    $('#meInfo').innerHTML = `<b>${esc(me.name)}</b> · ${me.total} puan ${myFlags.join('')}`;
-
-    const plan = rackPlan();
-    let status, actions = [];
-    actions.push('<button class="btn sm" data-act="sortSeries" title="Perleri otomatik diz">Seri Diz</button>');
-    actions.push('<button class="btn sm" data-act="sortPairs" title="Çiftleri otomatik diz">Çift Diz</button>');
-    if (v.status === 'roundEnd') {
-      status = 'El bitti.';
-      actions.push('<button class="btn sm primary" data-act="showResult">Sonuçlar</button>');
-    } else if (myTurnPhase('draw')) {
-      status = '<b>Sıra sende!</b> Desteden ya da soldaki oyuncunun attığından taş çek.';
-    } else if (myTurnPhase('play')) {
-      const mustInHand = v.mustUse !== null && v.hand.includes(v.mustUse);
-      status = '<b>Sıra sende!</b> ' + (mustInHand ? 'Yerden aldığın taşı bu tur kullanmalısın. ' : '') + 'Taşı ıstakadan sağdaki kutuya sürükle ya da seçip "At".';
-      if (!me.opened) {
-        actions.push(`<button class="btn sm primary" data-act="open" title="Istakada boşlukla ayrılmış perlerle aç">El Aç (${plan.sum} / ${plan.pairs.length} çift)</button>`);
-      } else {
-        actions.push('<button class="btn sm primary" data-act="lay" title="Istakadaki geçerli perleri yere indir">Yere İndir</button>');
-      }
-      if (mustInHand) actions.push('<button class="btn sm danger" data-act="giveBack" title="Taşı geri ver, 101 ceza yazılır">Geri Ver (+101)</button>');
-      actions.push(`<button class="btn sm" data-act="discardSel" ${S.selected.size === 1 ? '' : 'disabled'}>At</button>`);
-    } else {
-      status = `Sıra: <b>${esc(v.players[v.turn].name)}</b>`;
-    }
-    if (!me.opened && v.status === 'playing') {
-      status += `<div class="hint">Istakadaki perler: <b class="${plan.sum >= 101 ? 'good' : ''}">${plan.sum}</b>/101 · Çift: <b class="${plan.pairs.length >= 5 ? 'good' : ''}">${plan.pairs.length}</b>/5</div>`;
-    }
-    $('#status').innerHTML = status;
-    $('#actions').innerHTML = actions.join('');
-
-    // Istaka
-    const rows = [0, 1].map(row => {
-      let h = '';
-      for (let c = 0; c < COLS; c++) {
-        const i = row * COLS + c, id = S.rack[i];
-        let tile = '';
-        if (id !== null) {
-          const cls = [S.selected.has(id) ? 'selected' : '', id === v.lastDrawn ? 'new' : '', id === v.mustUse ? 'must' : ''].join(' ');
-          tile = tileHTML(id, { cls });
-        }
-        h += `<div class="slot" data-slot="${i}">${tile}</div>`;
-      }
-      return `<div class="rack-row">${h}</div>`;
-    }).join('');
-    $('#rack').innerHTML = rows;
-
-    const myTop = me.discards[me.discards.length - 1];
-    $('#myDiscard').innerHTML = `${myTop !== undefined ? tileHTML(myTop) : '<div class="tile empty"></div>'}<small>${myTurnPhase('play') ? 'Buraya at' : 'Attığın'}</small>`;
-    $('#myDiscard').classList.toggle('active', myTurnPhase('play'));
-
-    renderScores();
+    const m = MODES[v.mode];
+    const isOkey = v.mode === 'okey';
+    $('#okeyBoard').hidden = !isOkey;
+    $('#modeBoard').hidden = isOkey;
+    if (!isOkey) $('#modal').classList.add('hidden');
+    $('#game').dataset.mode = v.mode;
+    m.render(v, api);
+    $('#scores').innerHTML = m.scoresHTML(v, api);
     $('#log').innerHTML = v.log.map(l => `<div>${esc(l)}</div>`).join('');
     $('#log').scrollTop = 1e9;
-    renderModal();
+    renderRoom();
   }
 
-  function renderScores() {
-    const v = S.view;
-    const order = v.players.map((p, i) => ({ p, i })).sort((a, b) => a.p.total - b.p.total);
-    const head = v.players.map(p => `<th>${esc(p.name)}</th>`).join('');
-    const rows = v.history.map((h, r) => `<tr><td>${r + 1}</td>${h.map(x => `<td>${x}</td>`).join('')}</tr>`).join('');
-    const tot = `<tr class="tot"><td>Σ</td>${v.players.map(p => `<td>${p.total}</td>`).join('')}</tr>`;
-    $('#scores').innerHTML = `
-      <div class="leader">Önde: <b>${esc(order[0].p.name)}</b> (${order[0].p.total})</div>
-      <table class="score-table"><thead><tr><th>El</th>${head}</tr></thead><tbody>${rows}${tot}</tbody></table>
-      <p class="muted tiny">En düşük puan kazanır. Bitiren −101 (okeyle −202). Açmayan +202, açan elindeki taş toplamı. Okeyle veya çiftten bitince cezalar 2 kat.</p>`;
-  }
+  // Yan panel: oda, sesli sohbet, puan, olaylar, sohbet, görünüm
+  function renderRoom() {
+    const inRoom = S.joined && !!S.lobby;
+    $('#side').hidden = !inRoom;
+    document.body.classList.toggle('in-room', inRoom);
+    if (!inRoom) return;
+    const L = S.lobby, host = S.role === 'host';
+    const players = L.seats.filter(Boolean).map(s => {
+      const icon = s.kind === 'bot' ? '🤖' : s.voice ? (s.muted ? '🔇' : '🎤') : '👤';
+      return `<span class="rp ${s.connected ? '' : 'off'}">${icon} ${esc(s.name)}</span>`;
+    }).join('');
+    const playing = L.playing ? `<div class="row room-game"><span class="muted tiny">Oyun: <b>${MODES[L.playingMode].title}</b></span>
+      ${host ? '<button class="btn sm" data-act="toLobby">⟵ Lobiye Dön</button>' : ''}</div>` : '';
+    $('#roomPanel').innerHTML = `
+      <div class="room-head"><div><small>Oda</small> <b class="code-sm">${esc(S.code)}</b></div>
+        <button class="btn sm" data-act="copyLink">Davet</button></div>
+      <div class="room-players">${players}</div>${playing}`;
 
-  function renderModal() {
-    const v = S.view;
-    const m = $('#modal');
-    if (v.status !== 'roundEnd' || !v.result || S.modalHidden) { m.classList.add('hidden'); return; }
-    const r = v.result;
-    const rows = v.players.map((p, i) => `
-      <tr class="${i === r.winner ? 'win' : ''}">
-        <td>${esc(p.name)}${i === r.winner ? ' 🏆' : ''}</td>
-        <td>${i === r.winner ? 'Bitirdi' : r.opened[i] ? 'Açtı' : 'Açmadı'}${r.penalties[i] ? ` (+${r.penalties[i]} ceza)` : ''}</td>
-        <td class="num ${r.scores[i] < 0 ? 'good' : ''}">${r.scores[i] > 0 ? '+' : ''}${r.scores[i]}</td>
-        <td class="num"><b>${p.total}</b></td>
-      </tr>
-      <tr class="hand-row"><td colspan="4">${r.hands[i].map(id => tileHTML(id, { sm: true })).join('')}</td></tr>`).join('');
-    $('#modalCard').innerHTML = `
-      <h2>${v.round}. El Bitti</h2>
-      <p class="reason">${esc(r.reason)}</p>
-      <table class="result-table"><thead><tr><th>Oyuncu</th><th>Durum</th><th>Bu el</th><th>Toplam</th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="row">
-        ${S.role === 'host' ? '<button class="btn primary" data-act="nextRound">Sonraki El</button>' : '<span class="muted">Kurucunun yeni eli başlatması bekleniyor…</span>'}
-        <button class="btn ghost" data-act="closeModal">Masaya Bak</button>
-      </div>`;
-    m.classList.remove('hidden');
+    const inVoice = L.seats.filter(s => s && s.voice);
+    const list = inVoice.length
+      ? inVoice.map(s => `<span class="vchip ${s.muted ? 'muted' : ''}">${s.muted ? '🔇' : '🎤'} ${esc(s.name)}</span>`).join('')
+      : '<span class="muted tiny">Seste kimse yok.</span>';
+    const btns = Voice.on
+      ? `<button class="btn sm" data-act="voiceMute">${Voice.muted ? '🎤 Mikrofonu Aç' : '🔇 Sessize Al'}</button><button class="btn sm ghost" data-act="voiceLeave">Sesten Çık</button>`
+      : '<button class="btn sm primary" data-act="voiceJoin">🎤 Sese Katıl</button>';
+    $('#voicePanel').innerHTML = `<h3>Sesli Sohbet ${Voice.on ? '<span class="live">● Açık</span>' : ''}</h3><div class="vlist">${list}</div><div class="row">${btns}</div>`;
+    $('#themePanel').innerHTML = themeHTML();
+    const gameOn = !!S.view && $('#game').classList.contains('active');
+    $('#scoresPanel').hidden = !gameOn;
+    $('#logPanel').hidden = !gameOn;
   }
 
   function renderChat() {
@@ -704,118 +658,33 @@
     } catch { /* ses yok */ }
   }
 
-  // ================= Oyun hamleleri (arayüzden) =================
-  function doOpen() {
-    const plan = rackPlan();
-    if (plan.sum >= R.OPEN_SERIES_MIN) return sendAction({ type: 'open', mode: 'series', groups: plan.series });
-    if (plan.pairs.length >= R.OPEN_PAIRS_MIN) return sendAction({ type: 'open', mode: 'pairs', groups: plan.pairs });
-    toast(`Açmak için ıstakada boşlukla ayrılmış perlerin toplamı 101 olmalı (şu an ${plan.sum}) ya da 5 çift (şu an ${plan.pairs.length}). İpucu: "Seri Diz" / "Çift Diz".`);
-  }
-
-  function doLay() {
-    const v = S.view, me = v.players[v.you];
-    const plan = rackPlan();
-    const groups = me.openType === 'pairs' ? plan.pairs : plan.series;
-    if (!groups.length) return toast(me.openType === 'pairs' ? 'Istakada indirilecek çift yok.' : 'Istakada indirilecek geçerli per yok (en az 3 taş, boşlukla ayrılmış).');
-    sendAction({ type: 'lay', groups });
-  }
-
-  function doDiscard(id) {
-    if (!myTurnPhase('play')) return toast(myTurnPhase('draw') ? 'Önce taş çekmelisin.' : 'Sıra sende değil.');
-    sendAction({ type: 'discard', tile: id });
-  }
-
-  function doAddToGroup(groupId, ids) {
-    if (!myTurnPhase('play')) return toast('Sıra sende değil.');
-    if (!S.view.players[S.view.you].opened) return toast('İşlemek için önce elini açmalısın.');
-    if (!ids.length) return toast('Önce ıstakadan işlenecek taşı seç (ya da taşı pere sürükle).');
-    S.selected.clear();
-    sendAction({ type: 'add', groupId, tiles: ids });
-  }
-
-  // ================= Sürükle-bırak =================
-  let drag = null;
-
-  function clearOver() {
-    document.querySelectorAll('.over').forEach(el => el.classList.remove('over'));
-  }
-
-  function dropTarget(x, y) {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    return el.closest('[data-slot]') || el.closest('[data-drop="discard"]') || el.closest('[data-group]');
-  }
-
-  document.addEventListener('pointerdown', (e) => {
-    const t = e.target.closest('#rack .tile[data-id]');
-    if (!t || e.button > 0) return;
-    e.preventDefault();
-    drag = { id: +t.dataset.id, x: e.clientX, y: e.clientY, moved: false, ghost: null };
-  });
-
-  document.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6) {
-      drag.moved = true;
-      const src = document.querySelector(`#rack .tile[data-id="${drag.id}"]`);
-      drag.ghost = (src || document.createElement('div')).cloneNode(true);
-      drag.ghost.classList.add('ghost');
-      document.body.appendChild(drag.ghost);
-      if (src) src.classList.add('dragging');
-    }
-    if (drag.moved) {
-      drag.ghost.style.left = e.clientX + 'px';
-      drag.ghost.style.top = e.clientY + 'px';
-      clearOver();
-      const tg = dropTarget(e.clientX, e.clientY);
-      if (tg) tg.classList.add('over');
-    }
-  });
-
-  document.addEventListener('pointerup', (e) => {
-    if (!drag) return;
-    const d = drag;
-    drag = null;
-    clearOver();
-    if (!d.moved) {
-      if (S.selected.has(d.id)) S.selected.delete(d.id); else S.selected.add(d.id);
-      renderGame();
-      return;
-    }
-    d.ghost.remove();
-    const tg = dropTarget(e.clientX, e.clientY);
-    if (tg && tg.dataset.slot !== undefined) moveToSlot(d.id, +tg.dataset.slot);
-    else if (tg && tg.dataset.drop === 'discard') { renderGame(); return doDiscard(d.id); }
-    else if (tg && tg.dataset.group !== undefined) {
-      const ids = S.selected.has(d.id) && S.selected.size > 1 ? [...S.selected] : [d.id];
-      renderGame();
-      return doAddToGroup(+tg.dataset.group, ids);
-    }
-    renderGame();
-  });
-
-  document.addEventListener('pointercancel', () => {
-    if (drag && drag.ghost) drag.ghost.remove();
-    drag = null;
-    clearOver();
-    renderGame();
-  });
-
   // ================= Tıklamalar =================
   function readName() {
     const n = cleanText($('#name').value, 16);
     if (!n) { toast('Önce adını yaz.'); $('#name').focus(); return false; }
     S.name = n;
-    store.set('okey101-name', n);
+    store.set(NAME_KEY, n);
     return true;
   }
 
+  function leaveRoom() {
+    if (S.role === 'host' && !confirm('Odayı kapatırsan herkes çıkar. Emin misin?')) return;
+    if (S.role === 'host') store.del(HOST_SAVE);
+    sstore.del(SESSION);
+    location.href = location.pathname;
+  }
+
   document.addEventListener('click', (e) => {
+    const m = e.target.closest('[data-mact]');
+    if (m && !m.disabled && S.view && MODES[S.view.mode].onAct) {
+      MODES[S.view.mode].onAct(m.dataset.mact, m, api);
+      return;
+    }
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
     const act = b.dataset.act, i = +b.dataset.i;
     switch (act) {
-      case 'create': if (readName()) hostCreate(); break;
+      case 'create': if (readName()) { store.del(HOST_SAVE); hostCreate(false); } break;
       case 'join': {
         if (!readName()) break;
         const c = cleanText($('#code').value, 6).toUpperCase();
@@ -824,25 +693,29 @@
         break;
       }
       case 'copyLink':
-        navigator.clipboard.writeText(shareLink()).then(() => toast('Link kopyalandı!'), () => toast(shareLink()));
+        navigator.clipboard.writeText(shareLink()).then(() => toast('Davet linki kopyalandı!'), () => toast(shareLink()));
         break;
       case 'addBot': hostAddBot(i); break;
       case 'kick': hostKick(i); break;
+      case 'setMode': hostSetMode(b.dataset.k); break;
       case 'start': hostStart(); break;
-      case 'leave': location.href = location.pathname; break;
-      case 'reconnect': $('#overlayCard').innerHTML = '<h2>Bağlanılıyor…</h2>'; clientJoin(S.code); break;
-      case 'drawPile': sendAction({ type: 'draw', from: 'pile' }); break;
-      case 'takeDiscard': sendAction({ type: 'draw', from: 'discard' }); break;
-      case 'groupClick': doAddToGroup(+b.dataset.group, [...S.selected]); break;
-      case 'sortSeries': arrangeSeries(); break;
-      case 'sortPairs': arrangePairs(); break;
-      case 'open': doOpen(); break;
-      case 'lay': doLay(); break;
-      case 'giveBack': sendAction({ type: 'giveBack' }); break;
-      case 'discardSel': if (S.selected.size === 1) doDiscard([...S.selected][0]); break;
+      case 'toLobby': sendAction({ type: 'toLobby' }); break;
       case 'nextRound': sendAction({ type: 'nextRound' }); break;
-      case 'closeModal': S.modalHidden = true; renderModal(); break;
-      case 'showResult': S.modalHidden = false; renderModal(); break;
+      case 'leave': leaveRoom(); break;
+      case 'reconnect':
+        S.reconnecting = true;
+        S.retry = 0;
+        showOverlay('Bağlanılıyor…', 'Yeniden bağlanılıyor…', '<button class="btn ghost" data-act="leave">Ana Menü</button>');
+        scheduleReconnect();
+        break;
+      case 'voiceJoin':
+        store.set('okey101-voice', '1');
+        Voice.join().catch(err => toast('Mikrofon açılamadı: ' + (err.message || err.name)));
+        break;
+      case 'voiceLeave': store.set('okey101-voice', '0'); Voice.leave(); break;
+      case 'voiceMute': Voice.toggleMute(); break;
+      case 'setTable': store.set('okey101-table', b.dataset.k); applyTheme(); renderRoom(); break;
+      case 'setRack': store.set('okey101-rack', b.dataset.k); applyTheme(); renderRoom(); break;
     }
   });
 
@@ -854,17 +727,29 @@
 
   $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.querySelector('[data-act="join"]').click(); });
 
-  window.addEventListener('beforeunload', (e) => {
-    if (S.role === 'host' && S.seats.some(s => s && s.kind === 'remote')) { e.preventDefault(); e.returnValue = ''; }
-  });
+  Voice.onChange = renderRoom;
 
   // ================= Başlangıç =================
-  $('#name').value = store.get('okey101-name') || '';
-  const oda = new URLSearchParams(location.search).get('oda');
-  if (oda) {
-    $('#code').value = oda.toUpperCase();
-    $('#menuMsg').textContent = 'Davet linkiyle geldin: adını yazıp "Katıl"a bas.';
+  applyTheme();
+  $('#name').value = store.get(NAME_KEY) || '';
+  if (location.hash === '#debug') window.__app = S;
+  if (typeof Peer === 'undefined') {
+    $('#menuMsg').textContent = 'PeerJS yüklenemedi. İnternet bağlantını kontrol et.';
+  } else {
+    const oda = (new URLSearchParams(location.search).get('oda') || '').toUpperCase();
+    const sess = readJSON(sstore, SESSION);
+    const saved = readJSON(store, HOST_SAVE);
+    const alive = readJSON(store, ALIVE_KEY);
+    const thisTabHosts = sess && sess.role === 'host' && sess.code === oda;
+    const hostedElsewhere = alive && alive.code === oda && Date.now() - alive.t < 6000 && !thisTabHosts;
+    if (oda && saved && saved.code === oda && Date.now() - saved.at < 12 * 3600e3 && !hostedElsewhere) {
+      hostRestore(saved);                       // kurucu sayfayı yeniledi / geri döndü
+    } else if (oda && sess && sess.code === oda && sess.role === 'client' && sess.name) {
+      S.name = sess.name;                       // oyuncu sayfayı yeniledi
+      clientJoin(oda);
+    } else if (oda) {
+      $('#code').value = oda;
+      $('#menuMsg').textContent = 'Davet linkiyle geldin: adını yazıp "Katıl"a bas.';
+    }
   }
-  if (location.hash === '#debug') window.__okey = S;
-  if (typeof Peer === 'undefined') $('#menuMsg').textContent = 'PeerJS yüklenemedi. İnternet bağlantını kontrol et.';
 })();

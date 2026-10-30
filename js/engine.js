@@ -52,6 +52,8 @@
       this.note(`— ${this.round}. el başladı. ${this.players[this.dealer].name} başlıyor. Okey: ${R.tileName(R.okeyTileId(this.okey))}`);
     }
 
+    actorSeats() { return this.status === 'playing' ? [this.turn] : []; }
+
     apply(seat, a) {
       if (this.status !== 'playing') fail('El devam etmiyor.');
       if (seat !== this.turn) fail('Sıra sende değil.');

@@ -1,6 +1,6 @@
-# Okey 101 Online
+# Oyun Odası — Okey 101 · Pis Yedili · Blackjack
 
-Tarayıcıdan oynanan, 4 kişilik online Okey 101. Sunucu gerektirmez: oda kuran oyuncunun tarayıcısı oyunu yönetir, diğerleri PeerJS (WebRTC) ile doğrudan ona bağlanır. Bu yüzden GitHub Pages gibi statik bir yerde çalışır.
+Tarayıcıdan oynanan online oyun odası: **Okey 101**, **Pis Yedili** ve **Blackjack**. Oda kalıcıdır: oyun bitince lobiye dönülür, yeni oda kurmadan başka oyuna geçilir. Sesli sohbet oda boyunca açık kalır. Sunucu gerektirmez: oda kuran oyuncunun tarayıcısı oyunu yönetir, diğerleri PeerJS (WebRTC) ile doğrudan ona bağlanır. Bu yüzden GitHub Pages gibi statik bir yerde çalışır.
 
 ## Nasıl oynanır
 
@@ -15,7 +15,23 @@ Tarayıcıdan oynanan, 4 kişilik online Okey 101. Sunucu gerektirmez: oda kuran
 - Taş atmak için taşı sağdaki kutuya sürükle ya da seçip **At**'a bas.
 - Soldaki oyuncunun attığı taşı alırsan o tur kullanmak zorundasın. Kullanamazsan **Geri Ver** (101 ceza).
 
-## Puanlama (otomatik)
+## Oda ve lobi
+
+- Kurucu lobide oyunu seçer (Okey 101: 4 kişi, Pis Yedili: 2-4, Blackjack: 1-4) ve başlatır. Boş koltuklara bot eklenebilir.
+- Oyun bitince "Lobiye Dön" ile aynı odada başka oyuna geçilir. Oyun sürerken gelen kişi lobide bekler.
+- **Sesli sohbet** odaya girince otomatik açılır (mikrofon izni ister). Sessize alma ve sesten çıkma yan panelde.
+- **Görünüm**: yan panelden masa ve ıstaka rengi seçilir, her oyuncunun kendi tarayıcısında hatırlanır.
+- Kurucu sayfayı yenilerse oda ve oyun kaldığı yerden devam eder; diğer oyuncular kendiliğinden yeniden bağlanır.
+
+## Pis Yedili
+
+7: sıradaki 3 kart çeker (7'ler üst üste biner) · 8: sıradaki atlanır · 10: yön değişir · Vale: her kartın üstüne gider, rengi seçer. Tek kart kalınca "Son Kart!" denmezse yakalanan 2 kart çeker. Kalan kartlar ceza puanı; en düşük puan önde.
+
+## Blackjack
+
+Herkes krupiyeye karşı oynar, 1000 çiple başlar. Blackjack 3:2 öder, krupiye 17'de durur, ilk iki kartta ikiye katlanabilir.
+
+## Okey 101 Puanlama (otomatik)
 
 | Durum | Puan |
 |---|---|
@@ -42,13 +58,16 @@ Sonra tarayıcıda `http://localhost:8101` adresini aç.
 
 ## Bilinmesi gerekenler
 
-- Oyunu kurucunun tarayıcısı yönetir. Kurucu sekmeyi kapatırsa oda kapanır.
+- Oyunu kurucunun tarayıcısı yönetir. Kurucu sekmeyi kapatırsa oda kapanır; aynı linki 12 saat içinde tekrar açarsa oda geri gelir.
 - Kopan oyuncu aynı isimle aynı linke girerse yerine geri döner. O arada yerine bot oynar.
 - Bağlantı için ücretsiz PeerJS sunucusu kullanılır. Çok nadiren bazı kurumsal/okul ağlarında bağlantı kurulamayabilir.
 
 ## Dosyalar
 
-- `js/rules.js`: taşlar, per/çift kontrolü, otomatik dizme
-- `js/engine.js`: oyun akışı, puanlama, botlar
-- `js/app.js`: oda sistemi (PeerJS) ve arayüz
-- `css/style.css`: görünüm
+- `js/app.js`: oda sistemi (PeerJS), lobi, sohbet, tema, yeniden bağlanma
+- `js/voice.js`: sesli sohbet
+- `js/rules.js`, `js/engine.js`, `js/okey-ui.js`: Okey 101 kuralları, motoru ve arayüzü
+- `js/cards.js`, `js/yedili.js`, `js/blackjack.js`: iskambil oyunları
+- `css/style.css`: görünüm ve temalar
+
+Yeni sürüm yayınlarken `index.html` içindeki `?v=2` numaralarını artır ki oyuncular eski dosyaları önbellekten kullanmasın.
